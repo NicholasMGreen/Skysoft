@@ -12,6 +12,7 @@ import com.skysoft.features.inventory.InventoryButtonEditorScreen
 import com.skysoft.features.inventory.InventoryButtonImportCommand
 import com.skysoft.features.inventory.ItemProtectionManager
 import com.skysoft.features.inventory.itemlist.ItemListSearchCommand
+import com.skysoft.features.inventory.shopping.ShoppingListCommands
 import com.skysoft.features.misc.MouseLock
 import com.skysoft.features.misc.WarpAliases
 import com.skysoft.features.misc.autosprint.AutoSprint
@@ -95,6 +96,7 @@ class SkysoftMod : ClientModInitializer {
                     literal("blockoverlay")
                         .then(literal("additem").executes { BlockOverlay.addHeldItem(it.source) })
                 }
+                child { ShoppingListCommands.command() }
                 fallback("search") {
                     openMenu(StringArgumentType.getString(it, "search"))
                 }

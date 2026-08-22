@@ -1,11 +1,17 @@
 package com.skysoft.features.inventory.itemlist
 
 import com.skysoft.data.skyblock.ItemListEntryKey
+import com.skysoft.data.skyblock.ItemListEntryKind
 import com.skysoft.data.skyblock.SkyBlockCurrencyStacks
 import com.skysoft.data.skyblock.SkyBlockItemInfo
+import com.skysoft.features.inventory.shopping.ShoppingListState
+import com.skysoft.gui.tooltip.SkysoftNativeTooltip
 import com.skysoft.utils.SoundUtilities
+import com.skysoft.utils.gui.PixelButtonRenderer
 import com.skysoft.utils.gui.Rect
 import kotlin.math.roundToInt
+import net.minecraft.client.gui.Font
+import net.minecraft.client.gui.GuiGraphicsExtractor
 
 internal data class ViewerCardGrid(
     val bounds: Rect,
@@ -245,6 +251,36 @@ internal fun availableViewerMode(
 
 internal fun favoriteTooltip(isFavorite: Boolean): String =
     if (isFavorite) "Remove from favorites" else "Add to favorites"
+
+internal fun shoppingListTooltip(isTracked: Boolean): String =
+    if (isTracked) "Remove from Shopping List" else "Add to Shopping List"
+
+internal fun toggleShoppingListEntry(key: ItemListEntryKey): ViewerInputResult {
+    if (key.kind != ItemListEntryKind.SKYBLOCK) return ViewerInputResult.IGNORED
+    ShoppingListState.toggle(key)
+    return ViewerInputResult.HANDLED
+}
+
+internal fun renderShoppingListButton(
+    context: GuiGraphicsExtractor,
+    font: Font,
+    bounds: Rect,
+    key: ItemListEntryKey,
+    mouseX: Int,
+    mouseY: Int,
+) {
+    val canTrack = key.kind == ItemListEntryKind.SKYBLOCK
+    val isTracked = canTrack && ShoppingListState.contains(key)
+    val isHovered = bounds.contains(mouseX, mouseY)
+    PixelButtonRenderer.draw(context, font, bounds, if (isTracked) "✓" else "+", isTracked, isHovered, canTrack)
+    if (isHovered) {
+        val tooltip = when {
+            !canTrack -> "Only SkyBlock items can be added to the Shopping List"
+            else -> shoppingListTooltip(isTracked)
+        }
+        SkysoftNativeTooltip.setForNextFrame(context, listOf(tooltip), mouseX, mouseY)
+    }
+}
 
 internal fun itemInfoLines(
     key: ItemListEntryKey,

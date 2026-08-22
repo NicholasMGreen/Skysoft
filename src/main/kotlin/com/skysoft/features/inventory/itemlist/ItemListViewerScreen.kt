@@ -117,7 +117,12 @@ internal class ItemListViewerScreen(
         val mouseX = click.x().toInt()
         val mouseY = click.y().toInt()
         val result = when (click.button()) {
-            GLFW.GLFW_MOUSE_BUTTON_LEFT -> applyLeftClick(currentLayout, mouseX, mouseY)
+            GLFW.GLFW_MOUSE_BUTTON_LEFT ->
+                if (currentLayout.shoppingList.contains(mouseX, mouseY)) {
+                    toggleShoppingListEntry(currentKey)
+                } else {
+                    applyLeftClick(currentLayout, mouseX, mouseY)
+                }
             GLFW.GLFW_MOUSE_BUTTON_RIGHT -> {
                 val warp = requestNpcWarpAt(mode, infoPanel, entityBounds, mouseX, mouseY)
                 if (warp.shouldCloseScreen) MinecraftClient.setScreen(null)
@@ -291,6 +296,7 @@ internal class ItemListViewerScreen(
             layout.forward.contains(mouseX, mouseY),
             forwardStack.isNotEmpty(),
         )
+        renderShoppingListButton(context, font, layout.shoppingList, currentKey, mouseX, mouseY)
         renderFavoriteButton(context, font, layout.favorite, currentKey, mouseX, mouseY)
         PixelButtonRenderer.draw(context, font, layout.close, "X", false, layout.close.contains(mouseX, mouseY), true)
     }
@@ -1076,6 +1082,7 @@ private data class ViewerLayout(
     val title: Rect,
     val back: Rect,
     val forward: Rect,
+    val shoppingList: Rect,
     val favorite: Rect,
     val close: Rect,
     val infoTab: Rect,
@@ -1178,7 +1185,8 @@ private data class ViewerLayout(
                 ViewerPanelDimensions.SLOT_SIZE,
             )
             val favorite = headerButtonBefore(close)
-            val forward = headerButtonBefore(favorite)
+            val shoppingList = headerButtonBefore(favorite)
+            val forward = headerButtonBefore(shoppingList)
             val back = headerButtonBefore(forward)
             val tabsY = panel.y + ViewerTabDimensions.Y_OFFSET
             val infoTab = Rect(
@@ -1203,6 +1211,7 @@ private data class ViewerLayout(
                 title,
                 back,
                 forward,
+                shoppingList,
                 favorite,
                 close,
                 infoTab,
@@ -1321,7 +1330,7 @@ private object ViewerPanelDimensions {
 private object ViewerHeaderDimensions {
     const val TITLE_X_OFFSET = 24
     const val TITLE_Y_OFFSET = 9
-    const val TITLE_RESERVED_WIDTH = 170
+    const val TITLE_RESERVED_WIDTH = 196
     const val HEIGHT = 30
     const val CLOSE_RIGHT = 30
     const val BUTTON_TOP = 8

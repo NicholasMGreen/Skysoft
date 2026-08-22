@@ -145,6 +145,7 @@ data class ProfileStorage(
         @Expose val protectedItemUuids: MutableList<UUID> = mutableListOf(),
         @Expose val inventoryItemCounts: MutableMap<String, Int> = mutableMapOf(),
         @Expose val sackContents: MutableMap<String, SackItemData> = mutableMapOf(),
+        @Expose val shoppingList: ShoppingListData = ShoppingListData(),
         @Expose val profitTracker: ProfitTrackerData = ProfitTrackerData(),
         @Expose val slayerTimeToKill: SlayerTimeToKillData = SlayerTimeToKillData(),
         @Expose val bazaarTracker: BazaarTrackerData = BazaarTrackerData(),
@@ -175,6 +176,7 @@ data class ProfileStorage(
             inventoryItemCounts.entries.removeIf { (itemId, amount) -> itemId.isBlank() || amount <= 0 }
             sackContents.keys.removeIf(String::isBlank)
             sackContents.values.forEach(SackItemData::repairLoadedValues)
+            shoppingList.repairLoadedValues()
             profitTracker.repairLoadedValues()
             slayerTimeToKill.repairLoadedValues()
             bazaarTracker.repairLoadedValues()
@@ -338,6 +340,29 @@ data class ProfileStorage(
             }
         }
     }
+
+    data class ShoppingListData(
+        @Expose val items: MutableList<ShoppingListItemData> = mutableListOf(),
+    ) {
+        fun repairLoadedValues() {
+            val repaired = linkedMapOf<String, ShoppingListItemData>()
+            items.forEach { item ->
+                val itemId = item.itemId.trim()
+                if (itemId.isEmpty()) return@forEach
+                repaired[itemId] = ShoppingListItemData(
+                    itemId = itemId,
+                    targetAmount = item.targetAmount.coerceAtLeast(1L),
+                )
+            }
+            items.clear()
+            items.addAll(repaired.values)
+        }
+    }
+
+    data class ShoppingListItemData(
+        @Expose var itemId: String = "",
+        @Expose var targetAmount: Long = 1L,
+    )
 
     data class HoneyhiveTrackerData(
         @Expose var initialized: Boolean = false,
