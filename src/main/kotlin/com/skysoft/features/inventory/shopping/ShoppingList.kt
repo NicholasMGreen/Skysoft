@@ -4,7 +4,10 @@ import com.skysoft.config.SkysoftConfigGui
 import com.skysoft.data.ProfileStorageApi
 import com.skysoft.data.hypixel.HypixelLocationState
 import com.skysoft.data.skyblock.SkyBlockDataRepository
+import com.skysoft.data.skyblock.price.BazaarProductAvailability
+import com.skysoft.data.skyblock.price.SkyBlockPriceData
 import com.skysoft.features.inventory.InventoryOverlayInput
+import com.skysoft.features.inventory.itemlist.ItemListViewerScreen
 import com.skysoft.gui.GuiOverlay
 import com.skysoft.gui.GuiOverlayContextType
 import com.skysoft.gui.GuiOverlayLayer
@@ -103,27 +106,45 @@ private fun shouldAllowClick(screen: AbstractContainerScreen<*>, click: MouseBut
     if (InventoryOverlayInput.isPointCovered(screen, click.x(), click.y())) return true
     val control = hoveredControl?.action ?: return true
     val handled = when (control) {
-        is ShoppingListControl.Item -> wasItemClickHandled(control.itemId, click.button())
+        is ShoppingListControl.Item -> wasItemClickHandled(screen, control.itemId, click.button())
     }
     if (handled) SoundUtilities.playClickSound()
     return !handled
 }
 
-private fun wasItemClickHandled(itemId: String, button: Int): Boolean = when (button) {
-    GLFW.GLFW_MOUSE_BUTTON_LEFT -> {
-        val connection = Minecraft.getInstance().connection ?: return false
-        val key = SkyBlockDataRepository.itemKey(itemId)
-        val itemName = SkyBlockDataRepository.entry(key)?.displayName ?: return false
-        connection.sendCommand("bz $itemName")
-        MinecraftClient.setScreen(null)
-        true
+private fun wasItemClickHandled(screen: AbstractContainerScreen<*>, itemId: String, button: Int): Boolean =
+    when (button) {
+        GLFW.GLFW_MOUSE_BUTTON_LEFT -> wasLeftClickHandled(screen, itemId)
+        GLFW.GLFW_MOUSE_BUTTON_RIGHT -> {
+            ShoppingListState.remove(itemId)
+            true
+        }
+        else -> false
     }
-    GLFW.GLFW_MOUSE_BUTTON_RIGHT -> {
-        ShoppingListState.remove(itemId)
-        true
+
+private fun wasLeftClickHandled(screen: AbstractContainerScreen<*>, itemId: String): Boolean {
+    val key = SkyBlockDataRepository.itemKey(itemId)
+    if (!isOnBazaar(itemId)) {
+        if (!SkysoftConfigGui.config().inventory.itemList.enabled) return false
+        MinecraftClient.setScreen(ItemListViewerScreen(screen, key))
+        return true
     }
-    else -> false
+    val connection = Minecraft.getInstance().connection ?: return false
+    val itemName = SkyBlockDataRepository.entry(key)?.displayName ?: return false
+    connection.sendCommand("bz $itemName")
+    MinecraftClient.setScreen(null)
+    return true
 }
+
+private fun isOnBazaar(itemId: String): Boolean =
+    SkyBlockPriceData.bazaarAvailability(itemId) == BazaarProductAvailability.AVAILABLE
+
+private fun leftClickActionLabel(itemId: String): String =
+    if (isOnBazaar(itemId)) {
+        "§eLeft-click §7to open Bazaar"
+    } else {
+        "§eLeft-click §7to open Item List"
+    }
 
 private fun wasScrollHandled(verticalAmount: Double): Boolean {
     if (!isVisible() || !isHudHovered || verticalAmount == 0.0) return false
@@ -198,7 +219,7 @@ private fun renderHud(context: GuiGraphicsExtractor) {
                 screenMouseX,
                 screenMouseY,
                 actionLines = listOf(
-                    "§eLeft-click §7to open Bazaar",
+                    leftClickActionLabel(itemId),
                     "§eRight-click §7to remove from Shopping List",
                 ),
             )
@@ -240,6 +261,7 @@ private fun buildRenderable(): ShoppingListRenderable {
         hiddenBelow = (items.size - scrollOffset - displayed.size).coerceAtLeast(0),
         showTitle = config.details.showTitle,
         showIcons = config.details.showItemIcons,
+        showQuantities = config.details.showQuantities,
         background = config.details.showBackground,
     )
 }
@@ -264,6 +286,7 @@ private class ShoppingListRenderable(
     private val hiddenBelow: Int,
     private val showTitle: Boolean,
     private val showIcons: Boolean,
+    private val showQuantities: Boolean,
     private val background: Boolean,
 ) : GuiRenderable {
     private val padding = if (background) OverlayPanelStyle.PADDING else 0
@@ -271,16 +294,19 @@ private class ShoppingListRenderable(
         ShoppingListRow(
             item = item,
             name = item.name.truncateLegacyText(MAXIMUM_ITEM_NAME_LENGTH),
-            value = "§7x§e${item.targetAmount.addSeparators()}",
+            value = "§7x§e${item.targetAmount.addSeparators()}".takeIf { showQuantities },
             stack = item.stack,
             reserveIcon = showIcons,
         )
     }
     private val emptyText = "§7No shopping list items."
-    private val indicatorText = buildList {
-        if (hiddenAbove > 0) add("$hiddenAbove above")
-        if (hiddenBelow > 0) add("$hiddenBelow more")
-    }.joinToString(" §8• §7", prefix = "§7", postfix = if (hiddenAbove > 0 || hiddenBelow > 0) "..." else "")
+    private val indicatorText = when {
+        hiddenAbove <= 0 && hiddenBelow <= 0 -> ""
+        else -> buildList {
+            if (hiddenAbove > 0) add("$hiddenAbove above")
+            if (hiddenBelow > 0) add("$hiddenBelow more")
+        }.joinToString(" §8• §7", prefix = "§7", postfix = "...")
+    }
     private val titleText = "§e§lShopping List"
     private val contentWidth = maxOf(
         MINIMUM_WIDTH,
@@ -326,14 +352,14 @@ private class ShoppingListRenderable(
 private data class ShoppingListRow(
     val item: ShoppingListEntry,
     val name: String,
-    val value: String,
+    val value: String?,
     val stack: ItemStack?,
     val reserveIcon: Boolean,
 ) {
     private val iconWidth = if (reserveIcon) ITEM_TEXT_OFFSET else 0
     private val nameWidth = LegacyTextRenderer.width(name)
-    private val valueWidth = LegacyTextRenderer.width(value)
-    private val valueXOffset = iconWidth + nameWidth + COLUMN_GAP
+    private val valueWidth = value?.let(LegacyTextRenderer::width) ?: 0
+    private val valueXOffset = iconWidth + nameWidth + if (value != null) COLUMN_GAP else 0
     val width: Int = valueXOffset + valueWidth
 
     fun renderInteractive(
@@ -351,7 +377,7 @@ private data class ShoppingListRow(
         }
         if (reserveIcon) stack?.let { ItemIconRenderable(it, ICON_SCALE).renderAt(context, left, y) }
         LegacyTextRenderer.draw(context, name, left + iconWidth, y + ITEM_TEXT_Y_OFFSET)
-        LegacyTextRenderer.draw(context, value, left + valueXOffset, y + ITEM_TEXT_Y_OFFSET)
+        value?.let { LegacyTextRenderer.draw(context, it, left + valueXOffset, y + ITEM_TEXT_Y_OFFSET) }
         return LocalShoppingControl(ShoppingListControl.Item(item.itemId), bounds, emptyList()).takeIf { hovered }
     }
 }

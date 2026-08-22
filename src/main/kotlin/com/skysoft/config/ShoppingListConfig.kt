@@ -5,6 +5,7 @@ import com.skysoft.config.core.ConfigRepairable
 import com.skysoft.config.core.HudPosition
 import io.github.notenoughupdates.moulconfig.annotations.Accordion
 import io.github.notenoughupdates.moulconfig.annotations.ConfigEditorBoolean
+import io.github.notenoughupdates.moulconfig.annotations.ConfigEditorInfoText
 import io.github.notenoughupdates.moulconfig.annotations.ConfigEditorSlider
 import io.github.notenoughupdates.moulconfig.annotations.ConfigOption
 import io.github.notenoughupdates.moulconfig.annotations.ConfigVisibleIf
@@ -16,6 +17,18 @@ class ShoppingListConfig : ConfigRepairable {
     @field:MainFeatureToggle
     @field:ConfigEditorBoolean
     var enabled = false
+
+    @JvmField
+    @field:ConfigOption(
+        name = "Chat Commands",
+        desc = "§b/ss shopping add <item> [amount]§7 — add or update an item. " +
+            "§b/ss shopping remove <item>§7 — remove an item. " +
+            "§b/ss shopping clear§7 — clear the list. " +
+            "§b/ss shopping list§7 — show tracked items.",
+    )
+    @field:ConfigEditorInfoText
+    @field:ConfigVisibleIf("enabled")
+    val chatCommandsInfo: Unit = Unit
 
     @JvmField
     @field:Expose
@@ -72,6 +85,12 @@ class ShoppingListDetailsConfig {
     @field:ConfigOption(name = "Show Item Icons", desc = "Show item icons beside shopping list rows.")
     @field:ConfigEditorBoolean
     var showItemIcons = true
+
+    @JvmField
+    @field:Expose
+    @field:ConfigOption(name = "Show Quantities", desc = "Show the §7x§e1§7 amount beside each shopping list item.")
+    @field:ConfigEditorBoolean
+    var showQuantities = true
 
     @JvmField
     @field:Expose

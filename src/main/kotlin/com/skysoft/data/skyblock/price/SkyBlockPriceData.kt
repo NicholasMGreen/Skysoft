@@ -414,6 +414,7 @@ object SkyBlockPriceData {
         }
         bazaarConsumers.register("Profit Tracker") { SkysoftConfigGui.config().profitTrackers.isAnyEnabled() }
         bazaarConsumers.register("Sack Display") { SkysoftConfigGui.config().inventory.sackDisplay.enabled }
+        bazaarConsumers.register("Shopping List") { SkysoftConfigGui.config().inventory.shoppingList.enabled }
         lowestBinConsumers.register("Item List") { hasItemListMarketInterest.get() }
         lowestBinConsumers.register("Price Tooltips") { arePriceTooltipLinesActive { it.needsLowestBinData } }
         lowestBinConsumers.register("Rare Loot Features", ::isRareLootPricingActive)
