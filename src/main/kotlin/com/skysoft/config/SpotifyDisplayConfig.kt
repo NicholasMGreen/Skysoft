@@ -122,6 +122,8 @@ class SpotifyDisplayDetailsConfig {
         lyricsMode != SpotifyLyricsMode.OFF
     }
 
+    val roundedCornersVisible: Property<Boolean> = configVisibility { background }
+
     @JvmField
     @field:Expose
     @field:ConfigOption(name = "Album Artwork", desc = "Show the current album artwork.")
@@ -143,8 +145,15 @@ class SpotifyDisplayDetailsConfig {
 
     @JvmField
     @field:Expose
+    @field:ConfigOption(name = "Background", desc = "Draw a background behind the Spotify display.")
+    @field:ConfigEditorBoolean
+    var background = true
+
+    @JvmField
+    @field:Expose
     @field:ConfigOption(name = "Rounded Corners", desc = "Round the display corners.")
     @field:ConfigEditorBoolean
+    @field:ConfigVisibleIf("roundedCornersVisible")
     var roundedCorners = true
 }
 

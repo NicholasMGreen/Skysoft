@@ -78,7 +78,7 @@ object SpotifyDisplay {
                 override val id: String = "spotify_display"
                 override val label: String = "Spotify Display"
                 override val position get() = config().position
-                override val hasEditorBackground: Boolean = false
+                override val hasEditorBackground: Boolean get() = !config().details.background
                 override fun hudRenderable() = currentRenderable()
                 override fun isVisible(): Boolean = isDisplayVisible()
                 override fun openConfig() = SkysoftConfigGui.open("Spotify Display")
@@ -339,6 +339,7 @@ object SpotifyDisplay {
         lyricsMode = config().details.lyricsMode,
         lyricLineCount = config().details.lyricLineCount,
         roundedCorners = config().details.roundedCorners,
+        background = config().details.background,
         nowMillis = now,
     )
 

@@ -31,6 +31,7 @@ internal class SpotifyHudRenderable(
     private val lyricsMode: SpotifyLyricsMode,
     private val lyricLineCount: Int,
     private val roundedCorners: Boolean,
+    private val background: Boolean,
     private val nowMillis: Long,
 ) : GuiRenderable {
     private val lyricsHeight = LYRICS_PADDING * 2 + lyricLineCount * LYRICS_LINE_HEIGHT + PANEL_BORDER
@@ -228,6 +229,7 @@ internal class SpotifyHudRenderable(
     }
 
     private fun drawPanel(context: GuiGraphicsExtractor, y: Int, panelHeight: Int) {
+        if (!background) return
         context.fillOverlayBackground(
             0,
             y,
