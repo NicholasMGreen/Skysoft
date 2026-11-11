@@ -58,6 +58,7 @@ interface ProfileStorageView {
         val excludedItems: List<String>
         val customItems: List<String>
         val priceSources: Map<String, String>
+        val customPrices: Map<String, Double>
     }
 
     interface ProfitTrackerStats {

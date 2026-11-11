@@ -24,6 +24,9 @@ internal object ProfitTrackerItemCustomizations {
         data(target)?.priceSources?.get(itemId)
             ?.let { stored -> ProfitTrackerPriceSource.entries.firstOrNull { it.name == stored } }
 
+    fun customPrice(target: ProfitTrackerTarget, itemId: String): Double? =
+        data(target)?.customPrices?.get(itemId)?.takeIf { it.isFinite() && it > 0.0 }
+
     fun exclude(target: ProfitTrackerTarget, itemId: String) = update(target) { customizations ->
         if (target.custom != null) customizations.customItems.remove(itemId)
         else if (itemId !in customizations.excludedItems) customizations.excludedItems += itemId
@@ -42,6 +45,7 @@ internal object ProfitTrackerItemCustomizations {
         customizations.customItems.remove(itemId)
         customizations.excludedItems.remove(itemId)
         customizations.priceSources.remove(itemId)
+        customizations.customPrices.remove(itemId)
     }
 
     fun setPriceSource(target: ProfitTrackerTarget, itemId: String, source: ProfitTrackerPriceSource?) =
@@ -50,10 +54,16 @@ internal object ProfitTrackerItemCustomizations {
             else customizations.priceSources[itemId] = source.name
         }
 
+    fun setCustomPrice(target: ProfitTrackerTarget, itemId: String, price: Double?) = update(target) { customizations ->
+        if (price == null || !price.isFinite() || price <= 0.0) customizations.customPrices.remove(itemId)
+        else customizations.customPrices[itemId] = price
+    }
+
     fun reset(target: ProfitTrackerTarget) = update(target) { customizations ->
         customizations.excludedItems.clear()
         customizations.customItems.clear()
         customizations.priceSources.clear()
+        customizations.customPrices.clear()
     }
 
     private fun update(
@@ -75,5 +85,9 @@ internal object ProfitTrackerItemCustomizations {
     }
 
     private fun customTrackerCustomizations(custom: CustomProfitTrackerConfig) =
-        ProfileStorage.ProfitTrackerItemCustomizations(customItems = custom.items, priceSources = custom.priceSources)
+        ProfileStorage.ProfitTrackerItemCustomizations(
+            customItems = custom.items,
+            priceSources = custom.priceSources,
+            customPrices = custom.customPrices,
+        )
 }

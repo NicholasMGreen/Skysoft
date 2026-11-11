@@ -109,10 +109,12 @@ internal class ProfitTrackerHudControls(
         is ProfitTrackerControl.PestBreakdown -> false
         is ProfitTrackerControl.ManageItem -> wasLeftClickHandled(button) { itemPanel.toggleItem(action.itemId) }
         is ProfitTrackerControl.ItemPriceSource -> wasItemPriceSourceCycled(target, action.itemId, button)
+        is ProfitTrackerControl.ItemCustomPrice -> wasCustomItemPriceClicked(itemPanel, target, action.itemId, button)
         is ProfitTrackerControl.ModifyItem -> wasLeftClickHandled(button) {
             ProfitTracker.modifyItemAmount(target, action.itemId, action.amount)
         }
         is ProfitTrackerControl.BeginCustomModification -> wasLeftClickHandled(button) {
+            itemPanel.priceField.cancel()
             itemPanel.itemModifier.begin(action.direction)
         }
         is ProfitTrackerControl.ModifyItemField -> wasLeftClickHandled(button) {

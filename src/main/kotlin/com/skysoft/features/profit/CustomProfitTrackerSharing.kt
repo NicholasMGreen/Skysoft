@@ -21,6 +21,7 @@ internal object CustomProfitTrackerSharing {
             locations = tracker.locations.entries.map { SharedLocation(it.island, it.areas.toList()) },
             items = tracker.items.toList(),
             priceSources = tracker.priceSources.toMap(),
+            customPrices = tracker.customPrices.toMap(),
             trackCoins = tracker.trackCoins,
             priceSource = tracker.config.settings.priceSource.name,
             pauseAfter = tracker.config.settings.pauseAfter,
@@ -53,11 +54,15 @@ internal object CustomProfitTrackerSharing {
         val locations = shared.locations.map { location ->
             CustomProfitTrackerLocation(location.island, location.areas.toMutableList())
         }
+        val trackedItems = shared.items.toSet()
         val tracker = CustomProfitTrackerConfig(
             name = shared.name,
             locations = CustomProfitTrackerLocations(shared.anyIsland, locations.toMutableList()),
             items = shared.items.toMutableList(),
             priceSources = shared.priceSources.toMutableMap(),
+            customPrices = shared.customPrices.orEmpty().filterTo(mutableMapOf()) { (itemId, price) ->
+                itemId in trackedItems && itemId.isNotBlank() && price.isFinite() && price > 0.0
+            },
             trackCoins = shared.trackCoins,
         )
         with(tracker.config.settings) {
@@ -83,6 +88,7 @@ internal object CustomProfitTrackerSharing {
         val locations: List<SharedLocation> = emptyList(),
         val items: List<String> = emptyList(),
         val priceSources: Map<String, String> = emptyMap(),
+        val customPrices: Map<String, Double>? = emptyMap(),
         val trackCoins: Boolean = false,
         val priceSource: String = ProfitTrackerPriceSource.INSTANT_SELL.name,
         val pauseAfter: Boolean = true,

@@ -12,6 +12,7 @@ class CustomProfitTrackerConfig(
     @JvmField @field:Expose val locations: CustomProfitTrackerLocations = CustomProfitTrackerLocations(),
     @JvmField @field:Expose val items: MutableList<String> = mutableListOf(),
     @JvmField @field:Expose val priceSources: MutableMap<String, String> = mutableMapOf(),
+    @JvmField @field:Expose val customPrices: MutableMap<String, Double> = mutableMapOf(),
     @JvmField @field:Expose var trackCoins: Boolean = false,
     @JvmField @field:Expose val config: ProfitTrackerConfig = ProfitTrackerConfig(RESOURCE_TRACKER_SUMMARY_LINES),
 ) {
@@ -33,7 +34,11 @@ class CustomProfitTrackerConfig(
         locations.repairLoadedValues()
         items.repairTrimmedEntries()
         val validSources = ProfitTrackerPriceSource.entries.mapTo(mutableSetOf()) { it.name }
-        priceSources.entries.removeIf { (itemId, source) -> itemId !in items || source !in validSources }
+        val trackedItems = items.toSet()
+        priceSources.entries.removeIf { (itemId, source) -> itemId !in trackedItems || source !in validSources }
+        customPrices.entries.removeIf { (itemId, price) ->
+            itemId !in trackedItems || !price.isFinite() || price <= 0.0
+        }
     }
 }
 

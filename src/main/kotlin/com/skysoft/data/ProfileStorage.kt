@@ -151,12 +151,16 @@ data class ProfileStorage(
         @Expose override val excludedItems: MutableList<String> = mutableListOf(),
         @Expose override val customItems: MutableList<String> = mutableListOf(),
         @Expose override val priceSources: MutableMap<String, String> = mutableMapOf(),
+        @Expose override val customPrices: MutableMap<String, Double> = mutableMapOf(),
     ) : ProfileStorageView.ProfitTrackerItemCustomizations {
         fun repairLoadedValues() {
             excludedItems.repairWith { ids -> ids.filter(String::isNotBlank).distinct() }
             customItems.repairWith { ids -> ids.filter(String::isNotBlank).distinct() }
             priceSources.entries.removeIf { (itemId, source) ->
                 itemId.isBlank() || source !in PROFIT_TRACKER_PRICE_SOURCES
+            }
+            customPrices.entries.removeIf { (itemId, price) ->
+                itemId.isBlank() || !price.isFinite() || price <= 0.0
             }
         }
     }

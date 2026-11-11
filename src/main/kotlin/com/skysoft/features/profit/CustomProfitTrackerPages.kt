@@ -118,7 +118,9 @@ internal class CustomProfitTrackerPage(
     @field:ConfigOrder(25)
     val trackedItems: Property<MutableList<Int>> = Property.of<MutableList<Int>>(TrackerItemSelection(tracker.items)).also {
         it.addObserver { _, _ ->
-            tracker.priceSources.keys.retainAll(tracker.items.toSet())
+            val trackedItems = tracker.items.toSet()
+            tracker.priceSources.keys.retainAll(trackedItems)
+            tracker.customPrices.keys.retainAll(trackedItems)
             SkysoftConfigGui.config().saveNow()
         }
     }

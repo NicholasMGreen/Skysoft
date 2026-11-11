@@ -52,6 +52,7 @@ internal sealed interface ProfitTrackerControl {
         val formattedName: String,
     ) : ProfitTrackerControl
     data class ItemPriceSource(val itemId: String) : ProfitTrackerControl
+    data class ItemCustomPrice(val itemId: String) : ProfitTrackerControl
     data class ModifyItem(val itemId: String, val amount: Long) : ProfitTrackerControl
     data class BeginCustomModification(val direction: Int) : ProfitTrackerControl
     data class ModifyItemField(val localMouseX: Int, val bounds: Rect) : ProfitTrackerControl
@@ -69,6 +70,7 @@ internal class ProfitTrackerItemPanel {
     private val transition = PanelFadeTransition()
     private val addItemPanel = TrackedItemSelectionPanel()
     val itemModifier = TrackedItemQuantityModifier()
+    val priceField = ProfitTrackerItemPriceField()
     var isHovered = false
         private set
 
@@ -109,6 +111,10 @@ internal class ProfitTrackerItemPanel {
         select: (String) -> Unit,
         modify: (String, Long) -> Unit,
     ): Boolean {
+        if (priceField.wasKeyPressHandled(event) { itemId, price ->
+                ProfitTrackerItemCustomizations.setCustomPrice(target, itemId, price)
+            }
+        ) return true
         val item = content as? Content.Item
         if (item != null && itemModifier.wasKeyPressHandled(event) { amount -> modify(item.itemId, amount) }) return true
         if (!isSelectingItem) return false
@@ -116,7 +122,9 @@ internal class ProfitTrackerItemPanel {
     }
 
     fun wasCharTypedHandled(event: CharacterEvent): Boolean =
-        itemModifier.wasCharTypedHandled(event) || isSelectingItem && addItemPanel.wasCharTypedHandled(event)
+        priceField.wasCharTypedHandled(event) ||
+            itemModifier.wasCharTypedHandled(event) ||
+            isSelectingItem && addItemPanel.wasCharTypedHandled(event)
 
     fun wasSearchScrollHandled(target: ProfitTrackerTarget, verticalAmount: Double): Boolean {
         if (!isSelectingItem) return false
@@ -127,6 +135,7 @@ internal class ProfitTrackerItemPanel {
         if (content == null) return
         addItemPanel.clear()
         itemModifier.cancel()
+        priceField.cancel()
         transition.hide()
     }
 
@@ -134,6 +143,7 @@ internal class ProfitTrackerItemPanel {
         content = null
         addItemPanel.clear()
         itemModifier.cancel()
+        priceField.cancel()
         isHovered = false
         transition.reset()
     }
@@ -174,7 +184,9 @@ internal class ProfitTrackerItemPanel {
         val width = maxOf(
             PANEL_MINIMUM_WIDTH,
             rows.maxOfOrNull { row ->
-                row.quantityModifier?.width() ?: font.width(row.text) + row.iconOffset
+                row.priceField?.width(target, row.priceItemId.orEmpty())
+                    ?: row.quantityModifier?.width()
+                    ?: (font.width(row.text) + row.iconOffset)
             } ?: 0,
         ) + OverlayPanelStyle.PADDING * 2
         val height = rows.sumOf(PanelRow::height) + OverlayPanelStyle.PADDING * 2
@@ -184,7 +196,18 @@ internal class ProfitTrackerItemPanel {
         var hovered: OverlayControlArea<ProfitTrackerControl>? = null
         var rowY = OverlayPanelStyle.PADDING
         rows.forEach { row ->
-            row.render(context, font, x, width, rowY, mouseX, mouseY, opacity, transition.isInteractive)
+            row.render(
+                context,
+                font,
+                x,
+                width,
+                rowY,
+                mouseX,
+                mouseY,
+                opacity,
+                transition.isInteractive,
+                target,
+            )
                 ?.let { hovered = it }
             rowY += row.height
         }
@@ -193,6 +216,7 @@ internal class ProfitTrackerItemPanel {
 
     private fun open(next: Content) {
         itemModifier.cancel()
+        priceField.cancel()
         content = next
         transition.show()
     }
@@ -208,7 +232,7 @@ internal class ProfitTrackerItemPanel {
         Content.Overview -> overviewRows(target)
         Content.AddItem, Content.ManageItem -> emptyList()
         Content.Kernels -> kernelProfitRows()
-        is Content.Item -> itemRows(target, content.itemId, itemModifier)
+        is Content.Item -> itemRows(target, content.itemId, itemModifier, priceField)
     }
 
     private sealed interface Content {
@@ -225,6 +249,7 @@ private fun itemRows(
     target: ProfitTrackerTarget,
     itemId: String,
     itemModifier: TrackedItemQuantityModifier,
+    priceField: ProfitTrackerItemPriceField,
 ): List<PanelRow> {
     val override = ProfitTrackerItemCustomizations.priceSourceOverride(target, itemId)
     val source = override?.toString() ?: "Tracker Default"
@@ -237,6 +262,7 @@ private fun itemRows(
             ProfitTrackerControl.ItemPriceSource(itemId),
             OverlayControlTooltips.cycle("Item Price Source", sources, (override?.ordinal ?: -1) + 1),
         ),
+        customPricePanelRow(itemId, priceField),
         PanelRow(Component.empty(), quantityItemId = itemId, quantityModifier = itemModifier),
         if (target.custom == null) {
             PanelRow(styledText("Exclude", DANGER_COLOR), ProfitTrackerControl.ExcludeItem(itemId))
@@ -331,9 +357,14 @@ internal data class PanelRow(
     val heightOverride: Int? = null,
     val quantityItemId: String? = null,
     val quantityModifier: TrackedItemQuantityModifier? = null,
+    val priceItemId: String? = null,
+    val priceField: ProfitTrackerItemPriceField? = null,
 ) {
     val height: Int
-        get() = quantityModifier?.height ?: heightOverride ?: if (icon == null) ROW_HEIGHT else PANEL_ICON_ROW_HEIGHT
+        get() = priceField?.rowHeight()
+            ?: quantityModifier?.height
+            ?: heightOverride
+            ?: if (icon == null) ROW_HEIGHT else PANEL_ICON_ROW_HEIGHT
     val iconOffset: Int = if (icon == null) 0 else ICON_TEXT_OFFSET
 }
 
@@ -347,7 +378,22 @@ private fun PanelRow.render(
     mouseY: Int,
     opacity: Double,
     interactive: Boolean,
+    target: ProfitTrackerTarget,
 ): OverlayControlArea<ProfitTrackerControl>? {
+    priceField?.let { field ->
+        return field.render(
+            context,
+            target,
+            requireNotNull(priceItemId),
+            panelX,
+            panelWidth,
+            y,
+            mouseX,
+            mouseY,
+            opacity,
+            interactive,
+        )
+    }
     quantityModifier?.let { modifier ->
         val itemId = requireNotNull(quantityItemId)
         return modifier.render(context, panelX, y, mouseX, mouseY, opacity, interactive)?.let { control ->

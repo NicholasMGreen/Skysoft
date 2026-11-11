@@ -299,6 +299,7 @@ object ProfitTracker {
     }
 
     internal fun unitValue(target: ProfitTrackerTarget, itemId: String): Double? {
+        ProfitTrackerItemCustomizations.customPrice(target, itemId)?.let { return it }
         val sourcePrice = profitTrackerSourcePrice(itemId, ProfitTrackerItemCustomizations.priceSource(target, itemId))
         return sourcePrice?.takeIf { it > 0.0 }
             ?: SkyBlockPriceData.getLowestBin(itemId)?.toDouble()?.takeIf { it > 0.0 }
