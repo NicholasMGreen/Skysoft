@@ -67,7 +67,8 @@ class SlayerLeaderboardSettingsConfig {
     @field:ConfigOption(
         name = "Track Local Slayer XP",
         desc = "Add Slayer XP locally on each quest completion between 10-minute Elite SkyBlock fetches. " +
-            "Keeps your local XP if a fetch returns the same total, and hides the player ahead once passed.",
+            "Caches up to 20 upcoming players locally, queries 10 ahead at your local XP when Elite lags behind, " +
+            "and updates your rank and target as you pass them.",
     )
     @field:ConfigEditorBoolean
     var trackLocalXp = true

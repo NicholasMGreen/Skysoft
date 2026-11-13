@@ -124,10 +124,13 @@ object SlayerLeaderboardOverlay {
         rank = PREVIEW_RANK,
         amount = PREVIEW_AMOUNT,
         minAmount = PREVIEW_MIN_AMOUNT,
-        ahead = EliteLeaderboardAhead(
-            ign = "CatgirlArch",
-            amount = PREVIEW_AHEAD_AMOUNT,
-            rank = PREVIEW_AHEAD_RANK,
+        upcomingRank = PREVIEW_AHEAD_RANK,
+        upcomingPlayers = listOf(
+            EliteLeaderboardAhead(
+                ign = "CatgirlArch",
+                amount = PREVIEW_AHEAD_AMOUNT,
+                rank = PREVIEW_AHEAD_RANK,
+            ),
         ),
     )
 }

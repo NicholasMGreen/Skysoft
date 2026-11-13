@@ -19,6 +19,7 @@ import java.net.http.HttpRequest
 import java.time.Duration
 import java.util.Locale
 import java.util.concurrent.CompletableFuture
+import kotlin.math.roundToLong
 import net.minecraft.client.Minecraft
 
 object EliteLeaderboardClient {
@@ -59,9 +60,8 @@ object EliteLeaderboardClient {
         val profileId = profilesByPlayer[playerUuid]?.get(profileName) ?: return null
         val key = RankLookupKey(playerUuid, profileId, board.id)
         val snapshot = snapshots[key] ?: return null
-        if (!config.settings.trackLocalXp) return snapshot
+        if (!config.settings.trackLocalXp) return snapshot.withoutAnchoredUpcoming()
         val localGain = localXpOffsets[key] ?: 0L
-        if (localGain <= 0L) return snapshot
         return snapshot.withLocalXp(localGain)
     }
 
@@ -128,23 +128,51 @@ object EliteLeaderboardClient {
 
     private fun fetchRank(key: RankLookupKey) {
         val schedule = rankSchedules.getOrPut(key, ::RefreshSchedule)
-        val url = "$API_BASE_URL/leaderboard/${key.boardId}/${key.playerUuid}/${key.profileId}?upcoming=1"
+        val url = buildRankUrl(key)
         rankSlots.startIfIdle(
             key,
             requestFactory = { fetchJson(url) { body -> parseLeaderboardRank(key.boardId, body) } },
         ) { snapshot, error ->
             val now = System.currentTimeMillis()
             if (error == null && snapshot != null) {
-                val previous = snapshots[key]
-                if (previous == null || snapshot.amount != previous.amount) {
-                    localXpOffsets.remove(key)
-                }
+                reconcileLocalOffset(key, snapshots[key], snapshot)
                 snapshots[key] = snapshot
                 schedule.schedule(now, REFRESH_INTERVAL_MILLIS)
             } else if (error?.isCancellationFailure() != true) {
                 schedule.schedule(now, FAILURE_RETRY_MILLIS)
                 SkysoftMod.LOGGER.warn("Failed to refresh Elite SkyBlock leaderboard ${key.boardId}", error)
             }
+        }
+    }
+
+    private fun buildRankUrl(key: RankLookupKey): String {
+        val previous = snapshots[key]
+        val localGain = if (config.settings.trackLocalXp) localXpOffsets[key] ?: 0L else 0L
+        val baseUrl = "$API_BASE_URL/leaderboard/${key.boardId}/${key.playerUuid}/${key.profileId}"
+        if (previous != null && previous.isRanked && localGain > 0L) {
+            val localTotalXp = (previous.amount + localGain).roundToLong()
+            return "$baseUrl?upcoming=$UPCOMING_AT_AMOUNT_COUNT&atAmount=$localTotalXp"
+        }
+        return "$baseUrl?upcoming=$INITIAL_UPCOMING_COUNT"
+    }
+
+    private fun reconcileLocalOffset(
+        key: RankLookupKey,
+        previous: EliteLeaderboardSnapshot?,
+        current: EliteLeaderboardSnapshot,
+    ) {
+        if (previous == null) {
+            localXpOffsets.remove(key)
+            return
+        }
+        if (current.amount == previous.amount) return
+        val previousOffset = localXpOffsets[key] ?: 0L
+        val serverDelta = (current.amount - previous.amount).roundToLong()
+        val remainingOffset = if (serverDelta > 0L) (previousOffset - serverDelta).coerceAtLeast(0L) else 0L
+        if (remainingOffset > 0L) {
+            localXpOffsets[key] = remainingOffset
+        } else {
+            localXpOffsets.remove(key)
         }
     }
 
@@ -185,6 +213,8 @@ object EliteLeaderboardClient {
     private const val MAXIMUM_RESPONSE_BYTES = 1024L * 1024L
     private const val REFRESH_INTERVAL_MILLIS = 10L * 60L * 1000L
     private const val FAILURE_RETRY_MILLIS = 60L * 1000L
+    private const val INITIAL_UPCOMING_COUNT = 20
+    private const val UPCOMING_AT_AMOUNT_COUNT = 10
     private const val HTTP_SUCCESS_MIN = 200
     private const val HTTP_SUCCESS_MAX = 299
 }
@@ -200,18 +230,44 @@ internal data class EliteLeaderboardSnapshot(
     val rank: Int,
     val amount: Double,
     val minAmount: Double,
-    val ahead: EliteLeaderboardAhead?,
+    val upcomingRank: Int,
+    val upcomingPlayers: List<EliteLeaderboardAhead>,
 ) {
     val isRanked: Boolean get() = rank > 0 && amount >= minAmount
+    val ahead: EliteLeaderboardAhead? get() = upcomingPlayers.firstOrNull()
+
+    fun withoutAnchoredUpcoming(): EliteLeaderboardSnapshot {
+        val next = upcomingPlayers.firstOrNull()
+        return if (rank > 0 && next != null && next.rank != rank - 1) {
+            copy(upcomingRank = 0, upcomingPlayers = emptyList())
+        } else {
+            this
+        }
+    }
 
     fun withLocalXp(localGain: Long): EliteLeaderboardSnapshot {
+        if (localGain <= 0L) return this
         val updatedAmount = amount + localGain
-        val currentAhead = ahead
-        return if (isRanked && currentAhead != null && updatedAmount > currentAhead.amount) {
-            val updatedRank = currentAhead.rank.takeIf { it in 1 until rank } ?: (rank - 1).coerceAtLeast(1)
-            copy(rank = updatedRank, amount = updatedAmount, ahead = null)
-        } else {
-            copy(amount = updatedAmount)
+        if (!isRanked) return copy(amount = updatedAmount)
+        val nextIndex = upcomingPlayers.indexOfFirst { it.amount > updatedAmount }
+        return when {
+            nextIndex >= 0 -> {
+                val nextAhead = upcomingPlayers[nextIndex]
+                val updatedRank = nextAhead.rank.takeIf { it > 0 }?.plus(1) ?: rank
+                copy(
+                    rank = updatedRank,
+                    amount = updatedAmount,
+                    upcomingRank = nextAhead.rank,
+                    upcomingPlayers = upcomingPlayers.subList(nextIndex, upcomingPlayers.size),
+                )
+            }
+            upcomingPlayers.isNotEmpty() -> {
+                val lastPassed = upcomingPlayers.last()
+                val updatedRank = lastPassed.rank.takeIf { it in 1 until rank } ?: rank
+                copy(rank = updatedRank, amount = updatedAmount, upcomingRank = 0, upcomingPlayers = emptyList())
+            }
+            upcomingRank == 0 -> copy(rank = 1, amount = updatedAmount, upcomingPlayers = emptyList())
+            else -> copy(amount = updatedAmount)
         }
     }
 }
@@ -250,22 +306,23 @@ private fun parseLeaderboardRank(boardId: String, body: String): EliteLeaderboar
     val rank = json.intOrNull("rank") ?: -1
     val amount = json.doubleOrNull("amount") ?: 0.0
     val minAmount = json.doubleOrNull("minAmount") ?: 0.0
-    val ahead = json.arrayOrNull("upcomingPlayers")
-        ?.firstOrNull()
-        ?.takeIf { it.isJsonObject }
-        ?.asJsonObject
-        ?.let { player ->
-            val ign = player.stringOrNull("ign") ?: return@let null
-            val playerAmount = player.doubleOrNull("amount") ?: return@let null
+    val upcomingRank = json.intOrNull("upcomingRank") ?: 0
+    val upcomingPlayers = json.arrayOrNull("upcomingPlayers")
+        ?.mapNotNull { element ->
+            val player = element.takeIf { it.isJsonObject }?.asJsonObject ?: return@mapNotNull null
+            val ign = player.stringOrNull("ign") ?: return@mapNotNull null
+            val playerAmount = player.doubleOrNull("amount") ?: return@mapNotNull null
             val playerRank = player.intOrNull("rank") ?: -1
             EliteLeaderboardAhead(ign = ign, amount = playerAmount, rank = playerRank)
         }
+        .orEmpty()
     return EliteLeaderboardSnapshot(
         boardId = boardId,
         rank = rank,
         amount = amount,
         minAmount = minAmount,
-        ahead = ahead,
+        upcomingRank = upcomingRank,
+        upcomingPlayers = upcomingPlayers,
     )
 }
 
