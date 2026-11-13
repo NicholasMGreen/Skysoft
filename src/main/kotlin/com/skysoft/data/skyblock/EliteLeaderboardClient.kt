@@ -151,9 +151,9 @@ object EliteLeaderboardClient {
         val baseUrl = "$API_BASE_URL/leaderboard/${key.boardId}/${key.playerUuid}/${key.profileId}"
         if (previous != null && previous.isRanked && localGain > 0L) {
             val localTotalXp = (previous.amount + localGain).roundToLong()
-            return "$baseUrl?upcoming=$UPCOMING_AT_AMOUNT_COUNT&atAmount=$localTotalXp"
+            return "$baseUrl?upcoming=$UPCOMING_COUNT&atAmount=$localTotalXp"
         }
-        return "$baseUrl?upcoming=$INITIAL_UPCOMING_COUNT"
+        return "$baseUrl?upcoming=$UPCOMING_COUNT"
     }
 
     private fun reconcileLocalOffset(
@@ -213,8 +213,7 @@ object EliteLeaderboardClient {
     private const val MAXIMUM_RESPONSE_BYTES = 1024L * 1024L
     private const val REFRESH_INTERVAL_MILLIS = 10L * 60L * 1000L
     private const val FAILURE_RETRY_MILLIS = 60L * 1000L
-    private const val INITIAL_UPCOMING_COUNT = 20
-    private const val UPCOMING_AT_AMOUNT_COUNT = 10
+    private const val UPCOMING_COUNT = 20
     private const val HTTP_SUCCESS_MIN = 200
     private const val HTTP_SUCCESS_MAX = 299
 }
