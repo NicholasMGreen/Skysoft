@@ -34,20 +34,18 @@ object EliteLeaderboardClient {
     private val profileSchedules = mutableMapOf<String, RefreshSchedule>()
     private val snapshots = mutableMapOf<RankLookupKey, EliteLeaderboardSnapshot>()
     private val rankSchedules = mutableMapOf<RankLookupKey, RefreshSchedule>()
+    private val localXpOffsets = mutableMapOf<RankLookupKey, Long>()
 
     fun register() {
         SkyBlockProfileApi.registerConsumer("Slayer Leaderboard") { isEnabled() }
+        MayorPerkApi.registerConsumer("Slayer Leaderboard Local XP") { isEnabled() && config.settings.trackLocalXp }
         SkyBlockProfileApi.onProfileChange("Slayer Leaderboard profile", ::isEnabled) { profileKey ->
-            if (profileKey != null) refreshActiveNow()
+            if (profileKey != null) refreshActiveIfDue()
         }
         HypixelLocationState.onChange("Slayer Leaderboard location", ::isEnabled) { location ->
-            if (location.inSkyBlock) refreshActiveNow()
+            if (location.inSkyBlock) refreshActiveIfDue()
         }
-        SlayerQuestState.onQuestComplete("Slayer Leaderboard quest complete") { quest ->
-            if (!isEnabled()) return@onQuestComplete
-            invalidateOnQuestComplete(quest.slayerType)
-            refreshActiveNow()
-        }
+        SlayerQuestState.onQuestComplete("Slayer Leaderboard quest complete", ::onQuestComplete)
         SkysoftClientEvents.onEndTick("Slayer Leaderboard tick", ::isEnabled) {
             refreshActiveIfDue()
         }
@@ -59,7 +57,12 @@ object EliteLeaderboardClient {
         val playerUuid = currentPlayerUuid() ?: return null
         val profileName = SkyBlockProfileApi.currentProfileKey ?: return null
         val profileId = profilesByPlayer[playerUuid]?.get(profileName) ?: return null
-        return snapshots[RankLookupKey(playerUuid, profileId, board.id)]
+        val key = RankLookupKey(playerUuid, profileId, board.id)
+        val snapshot = snapshots[key] ?: return null
+        if (!config.settings.trackLocalXp) return snapshot
+        val localGain = localXpOffsets[key] ?: 0L
+        if (localGain <= 0L) return snapshot
+        return snapshot.withLocalXp(localGain)
     }
 
     private fun isEnabled(): Boolean = config.enabled
@@ -72,18 +75,22 @@ object EliteLeaderboardClient {
         return settings.board
     }
 
-    private fun refreshActiveNow() {
-        if (!HypixelLocationState.inSkyBlock || !isEnabled()) return
+    private fun onQuestComplete(quest: SlayerQuestSnapshot) {
+        if (!isEnabled() || !config.settings.trackLocalXp) return
+        val slayerType = quest.slayerType ?: return
+        val tier = quest.tier ?: return
+        val gainedXp = slayerQuestXp(slayerType, tier, MayorPerkApi.slayerXpBuffActive)
+        if (gainedXp <= 0L) return
         val playerUuid = currentPlayerUuid() ?: return
         val profileName = SkyBlockProfileApi.currentProfileKey ?: return
-        val profileId = profilesByPlayer[playerUuid]?.get(profileName)
-        if (profileId == null) {
-            fetchProfilesIfDue(playerUuid, force = true)
-            return
+        val profileId = profilesByPlayer[playerUuid]?.get(profileName) ?: return
+        val matchingBoards = listOf(EliteSlayerBoard.fromSlayerType(slayerType), EliteSlayerBoard.TOTAL)
+        for (board in matchingBoards) {
+            val key = RankLookupKey(playerUuid, profileId, board.id)
+            if (key in snapshots) {
+                localXpOffsets[key] = (localXpOffsets[key] ?: 0L) + gainedXp
+            }
         }
-        val key = RankLookupKey(playerUuid, profileId, currentBoard().id)
-        rankSchedules.getOrPut(key, ::RefreshSchedule).reset()
-        fetchRank(key)
     }
 
     private fun refreshActiveIfDue() {
@@ -92,7 +99,7 @@ object EliteLeaderboardClient {
         val profileName = SkyBlockProfileApi.currentProfileKey ?: return
         val profileId = profilesByPlayer[playerUuid]?.get(profileName)
         if (profileId == null) {
-            fetchProfilesIfDue(playerUuid, force = false)
+            fetchProfilesIfDue(playerUuid)
             return
         }
         val key = RankLookupKey(playerUuid, profileId, currentBoard().id)
@@ -100,21 +107,8 @@ object EliteLeaderboardClient {
         if (schedule.isDue(System.currentTimeMillis())) fetchRank(key)
     }
 
-    private fun invalidateOnQuestComplete(slayerType: SkyBlockSlayerType?) {
-        val playerUuid = currentPlayerUuid() ?: return
-        val profileName = SkyBlockProfileApi.currentProfileKey ?: return
-        val profileId = profilesByPlayer[playerUuid]?.get(profileName) ?: return
-        rankSchedules[RankLookupKey(playerUuid, profileId, currentBoard().id)]?.reset()
-        rankSchedules[RankLookupKey(playerUuid, profileId, EliteSlayerBoard.TOTAL.id)]?.reset()
-        slayerType?.let { type ->
-            val boardId = EliteSlayerBoard.fromSlayerType(type).id
-            rankSchedules[RankLookupKey(playerUuid, profileId, boardId)]?.reset()
-        }
-    }
-
-    private fun fetchProfilesIfDue(playerUuid: String, force: Boolean) {
+    private fun fetchProfilesIfDue(playerUuid: String) {
         val schedule = profileSchedules.getOrPut(playerUuid, ::RefreshSchedule)
-        if (force) schedule.reset()
         if (!schedule.isDue(System.currentTimeMillis())) return
         profileSlots.startIfIdle(
             playerUuid,
@@ -141,6 +135,10 @@ object EliteLeaderboardClient {
         ) { snapshot, error ->
             val now = System.currentTimeMillis()
             if (error == null && snapshot != null) {
+                val previous = snapshots[key]
+                if (previous == null || snapshot.amount != previous.amount) {
+                    localXpOffsets.remove(key)
+                }
                 snapshots[key] = snapshot
                 schedule.schedule(now, REFRESH_INTERVAL_MILLIS)
             } else if (error?.isCancellationFailure() != true) {
@@ -205,6 +203,17 @@ internal data class EliteLeaderboardSnapshot(
     val ahead: EliteLeaderboardAhead?,
 ) {
     val isRanked: Boolean get() = rank > 0 && amount >= minAmount
+
+    fun withLocalXp(localGain: Long): EliteLeaderboardSnapshot {
+        val updatedAmount = amount + localGain
+        val currentAhead = ahead
+        return if (isRanked && currentAhead != null && updatedAmount > currentAhead.amount) {
+            val updatedRank = currentAhead.rank.takeIf { it in 1 until rank } ?: (rank - 1).coerceAtLeast(1)
+            copy(rank = updatedRank, amount = updatedAmount, ahead = null)
+        } else {
+            copy(amount = updatedAmount)
+        }
+    }
 }
 
 private data class RankLookupKey(
@@ -212,6 +221,17 @@ private data class RankLookupKey(
     val profileId: String,
     val boardId: String,
 )
+
+private val STANDARD_SLAYER_XP_BY_TIER = longArrayOf(5L, 25L, 100L, 500L, 1_500L)
+private val VAMPIRE_SLAYER_XP_BY_TIER = longArrayOf(10L, 25L, 60L, 120L, 150L)
+private const val AATROX_XP_NUMERATOR = 5L
+private const val AATROX_XP_DENOMINATOR = 4L
+
+private fun slayerQuestXp(slayerType: SkyBlockSlayerType, tier: Int, mayorXpBuffActive: Boolean): Long {
+    val table = if (slayerType == SkyBlockSlayerType.VAMPIRE) VAMPIRE_SLAYER_XP_BY_TIER else STANDARD_SLAYER_XP_BY_TIER
+    val baseXp = table.getOrNull(tier - 1) ?: return 0L
+    return if (mayorXpBuffActive) (baseXp * AATROX_XP_NUMERATOR) / AATROX_XP_DENOMINATOR else baseXp
+}
 
 private fun parseProfilesMap(body: String): Map<String, String> {
     val array = JsonParser.parseString(body).takeIf { it.isJsonArray }?.asJsonArray ?: return emptyMap()

@@ -8,6 +8,7 @@ object MayorPerkApi {
     private const val ELECTION_URL = "https://api.hypixel.net/v2/resources/skyblock/election"
     private const val SHARING_IS_CARING = "Sharing is Caring"
     private const val PET_XP_BUFF = "Pet XP Buff"
+    private const val SLAYER_XP_BUFF = "Slayer XP Buff"
     private const val MYTHOLOGICAL_RITUAL = "Mythological Ritual"
     private const val CHIVALROUS_CARNIVAL = "Chivalrous Carnival"
     private const val FISHING_FESTIVAL = "Fishing Festival"
@@ -37,6 +38,7 @@ object MayorPerkApi {
     val currentMinister: CurrentMinister? get() = currentPerks.currentMinister
     val sharingIsCaringActive: Boolean get() = currentPerks.sharingIsCaringActive
     val petXpBuffActive: Boolean get() = currentPerks.petXpBuffActive
+    val slayerXpBuffActive: Boolean get() = currentPerks.slayerXpBuffActive
     val mythologicalRitualActive: Boolean get() = currentPerks.mythologicalRitualActive
     val grandFeastActive: Boolean get() = currentPerks.grandFeastActive
     val mythologicalRitualEventKey: String? get() = currentPerks.mythologicalRitualEventKey
@@ -66,6 +68,7 @@ object MayorPerkApi {
         currentMinister = currentMinister(),
         sharingIsCaringActive = hasPerk(SHARING_IS_CARING),
         petXpBuffActive = hasPerk(PET_XP_BUFF),
+        slayerXpBuffActive = hasPerk(SLAYER_XP_BUFF),
         mythologicalRitualActive = hasPerk(MYTHOLOGICAL_RITUAL),
         carnivalActive = hasPerk(CHIVALROUS_CARNIVAL),
         fishingFestivalActive = hasPerk(FISHING_FESTIVAL),
@@ -140,6 +143,7 @@ internal data class MayorPerks(
     val currentMinister: CurrentMinister? = null,
     val sharingIsCaringActive: Boolean = false,
     val petXpBuffActive: Boolean = false,
+    val slayerXpBuffActive: Boolean = false,
     val mythologicalRitualActive: Boolean = false,
     val carnivalActive: Boolean = false,
     val fishingFestivalActive: Boolean = false,

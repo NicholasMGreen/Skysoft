@@ -86,19 +86,20 @@ object SlayerLeaderboardOverlay {
         nameColor: Int,
     ): GuiRenderable {
         val labelSegment = StringRenderable("${board.shortLabel}: ", color = labelColor)
-        if (!snapshot.isRanked) {
+        if (snapshot.amount < snapshot.minAmount) {
             return horizontalLayout(listOf(labelSegment, StringRenderable("Not ranked", color = behindColor)))
         }
         val formattedAmount = snapshot.amount.roundToLong().addSeparators()
-        return horizontalLayout(
-            listOf(
-                labelSegment,
-                StringRenderable(formattedAmount, color = numberColor),
-                StringRenderable(" [", color = behindColor),
-                StringRenderable("#${snapshot.rank.addSeparators()}", color = nameColor),
-                StringRenderable("]", color = behindColor),
-            ),
-        )
+        val segments = buildList {
+            add(labelSegment)
+            add(StringRenderable(formattedAmount, color = numberColor))
+            if (snapshot.rank > 0) {
+                add(StringRenderable(" [", color = behindColor))
+                add(StringRenderable("#${snapshot.rank.addSeparators()}", color = nameColor))
+                add(StringRenderable("]", color = behindColor))
+            }
+        }
+        return horizontalLayout(segments)
     }
 
     private fun secondLine(

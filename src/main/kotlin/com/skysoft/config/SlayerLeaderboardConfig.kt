@@ -63,6 +63,16 @@ class SlayerLeaderboardSettingsConfig {
     var followActiveQuest = false
 
     @JvmField
+    @field:Expose
+    @field:ConfigOption(
+        name = "Track Local Slayer XP",
+        desc = "Add Slayer XP locally on each quest completion between 10-minute Elite SkyBlock fetches. " +
+            "Keeps your local XP if a fetch returns the same total, and hides the player ahead once passed.",
+    )
+    @field:ConfigEditorBoolean
+    var trackLocalXp = true
+
+    @JvmField
     @field:ConfigOption(
         name = "Elite Leaderboard",
         desc = "Powered by Elite SkyBlock. Open the selected leaderboard at https://eliteskyblock.com/.",
