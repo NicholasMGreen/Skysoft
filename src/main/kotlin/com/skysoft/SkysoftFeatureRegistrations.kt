@@ -11,6 +11,7 @@ import com.skysoft.data.hypixel.SkyBlockCookieBuffApi
 import com.skysoft.data.hypixel.SkyBlockProfileApi
 import com.skysoft.data.hypixel.TabListApi
 import com.skysoft.data.skyblock.AttributeShardCatalog
+import com.skysoft.data.skyblock.EliteLeaderboardClient
 import com.skysoft.data.skyblock.GardenPestState
 import com.skysoft.data.skyblock.MayorPerkApi
 import com.skysoft.data.skyblock.SafariZoneState
@@ -130,6 +131,7 @@ import com.skysoft.features.screenshot.ScreenshotCapturePreview
 import com.skysoft.features.screenshot.ScreenshotManager
 import com.skysoft.features.slayer.BlazeAttunementHighlighting
 import com.skysoft.features.slayer.SlayerBossAlerts
+import com.skysoft.features.slayer.SlayerLeaderboardOverlay
 import com.skysoft.features.slayer.SlayerMinibossAlert
 import com.skysoft.features.slayer.SlayerTargetHighlighting
 import com.skysoft.features.slayer.SlayerTimeToKill
@@ -178,6 +180,7 @@ internal object SkysoftFeatureRegistrations {
         register("SkyBlock Event Schedule", SkyBlockEventScheduleApi::register)
         register("SkyBlock Event State", SkyBlockEventState::register)
         register("Slayer Quest State", SlayerQuestState::register)
+        register("Elite Leaderboard Client", EliteLeaderboardClient::register)
         register("SkyBlock Price Data", SkyBlockPriceData::register)
         register("SkyBlock Data Repository", SkyBlockDataRepository::register)
         register("Entity Highlight Renderer", EntityHighlightRenderer::register)
@@ -290,6 +293,7 @@ internal object SkysoftFeatureRegistrations {
         register("Slayer Target Highlighting", SlayerTargetHighlighting::register)
         register("Blaze Attunement Highlighting", BlazeAttunementHighlighting::register)
         register("Slayer Time to Kill", SlayerTimeToKill::register)
+        register("Slayer Leaderboard", SlayerLeaderboardOverlay::register)
         register("Sea Creature Catch Messages", SeaCreatureCatchMessages::register)
         register("Fishing Hotspot Sharing", FishingHotspotSharing::register)
         register("Fishing Hotspot Radar", FishingHotspotRadar::register)

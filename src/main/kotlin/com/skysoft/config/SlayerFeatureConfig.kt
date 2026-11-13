@@ -28,6 +28,14 @@ class SlayerFeatureConfig {
 
     @JvmField
     @field:Expose
+    @field:Category(
+        name = "Slayer Leaderboard",
+        desc = "Show your slayer XP rank from Elite SkyBlock (https://eliteskyblock.com/).",
+    )
+    val leaderboard = SlayerLeaderboardConfig()
+
+    @JvmField
+    @field:Expose
     @field:ConfigOption(
         name = "Blaze Attunement Highlights",
         desc = "Outline and tint Inferno Demonlord mobs with their current Hellion Shield attunement color.",
