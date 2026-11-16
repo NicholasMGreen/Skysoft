@@ -75,8 +75,9 @@ class EliteLeaderboardSettingsConfig {
     @field:Expose
     @field:ConfigOption(
         name = "Track Local Progress",
-        desc = "Add local gains (Slayer XP, Garden Pest kills, Skill XP) between 10-minute Elite SkyBlock fetches. " +
-            "Caches 20 upcoming entries locally and queries 20 ahead at your local score when Elite lags behind.",
+        desc = "Add local gains (Slayer XP, Garden Pest kills, Skill XP, Collections, Bestiary kills) between " +
+            "10-minute Elite SkyBlock fetches. Caches 20 upcoming entries locally and queries 20 ahead at your " +
+            "local score when Elite lags behind.",
     )
     @field:ConfigEditorBoolean
     var trackLocalProgress = true

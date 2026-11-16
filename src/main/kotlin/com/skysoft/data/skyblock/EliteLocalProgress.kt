@@ -1,5 +1,6 @@
 package com.skysoft.data.skyblock
 
+import com.skysoft.features.combat.EliteBestiaryKillTracker
 import java.util.Locale
 
 internal object EliteLocalProgress {
@@ -19,6 +20,8 @@ internal object EliteLocalProgress {
             isActive = { EliteLeaderboardClient.isTrackingLocalProgress() },
             listener = ::onSkillExpGain,
         )
+        EliteCollectionProgress.register()
+        EliteBestiaryKillTracker.register()
     }
 
     private fun onSlayerQuestComplete(quest: SlayerQuestSnapshot) {

@@ -77,6 +77,19 @@ object EliteLeaderboardCatalog {
     fun categories(): List<String> =
         entries().map(EliteLeaderboardInfo::category).distinct()
 
+    fun boardsForCollection(collectionId: String): List<String> {
+        val canonical = canonicalSkyBlockItemId(collectionId)
+        val source = catalog.ifEmpty { FALLBACK_BOARDS }
+        return source.values
+            .filter { it.collectionId == canonical }
+            .map(EliteLeaderboardInfo::id)
+    }
+
+    fun bestiaryBoards(): List<EliteLeaderboardInfo> {
+        val source = catalog.ifEmpty { FALLBACK_BOARDS }
+        return source.values.filter { it.bestiaryId != null && it.category == "Bestiary" }
+    }
+
     internal fun <T> fetchJson(url: String, parse: (String) -> T): CompletableFuture<T> {
         val request = HttpRequest.newBuilder(URI.create(url))
             .timeout(Duration.ofSeconds(REQUEST_TIMEOUT_SECONDS))
@@ -156,6 +169,8 @@ data class EliteLeaderboardInfo(
     val minimumScore: Double,
     val scoreDataType: EliteScoreDataType,
     val intervalType: EliteIntervalType,
+    val collectionId: String? = null,
+    val bestiaryId: String? = null,
 ) {
     fun url(): String = "$ELITE_LEADERBOARD_BASE_URL/$id"
 
@@ -223,6 +238,10 @@ private fun parseLeaderboardInfo(id: String, obj: JsonObject): EliteLeaderboardI
     val minimumScore = obj.get("minimumScore")?.takeUnless { it.isJsonNull }?.asDouble ?: 0.0
     val scoreDataType = EliteScoreDataType.fromApi(obj.catalogString("scoreDataType"))
     val intervalType = EliteIntervalType.fromApi(obj.catalogString("intervalType"))
+    val rawCollection = obj.catalogString("collection")
+        ?: obj.catalogString("itemId")?.takeIf { category == "Milestones" }
+    val collectionId = rawCollection?.let(::canonicalSkyBlockItemId)
+    val bestiaryId = obj.catalogString("bestiary")
     return EliteLeaderboardInfo(
         id = id,
         title = title,
@@ -232,6 +251,8 @@ private fun parseLeaderboardInfo(id: String, obj: JsonObject): EliteLeaderboardI
         minimumScore = minimumScore,
         scoreDataType = scoreDataType,
         intervalType = intervalType,
+        collectionId = collectionId,
+        bestiaryId = bestiaryId,
     )
 }
 
@@ -247,6 +268,8 @@ private fun fallbackBoard(
     intervalType: EliteIntervalType = EliteIntervalType.CURRENT,
     minimumScore: Double = 0.0,
     isProfileBoard: Boolean = false,
+    collectionId: String? = null,
+    bestiaryId: String? = null,
 ): Pair<String, EliteLeaderboardInfo> = id to EliteLeaderboardInfo(
     id = id,
     title = title,
@@ -256,6 +279,8 @@ private fun fallbackBoard(
     minimumScore = minimumScore,
     scoreDataType = scoreDataType,
     intervalType = intervalType,
+    collectionId = collectionId,
+    bestiaryId = bestiaryId,
 )
 
 private val FALLBACK_BOARDS: Map<String, EliteLeaderboardInfo> = mapOf(
@@ -283,6 +308,11 @@ private val FALLBACK_BOARDS: Map<String, EliteLeaderboardInfo> = mapOf(
     fallbackBoard("slayer-xp", "Total Slayer Experience", "Slayer XP", "Slayers", EliteScoreDataType.DECIMAL, minimumScore = 1000.0),
     fallbackBoard("pests", "Pest Kills", "Pest Kills", "Pests", minimumScore = 100.0),
     fallbackBoard("pests-monthly", "Pest Kills", "Pest Kills", "Pests", intervalType = EliteIntervalType.MONTHLY, minimumScore = 100.0),
+    fallbackBoard("coal", "Coal Collection", "Coal", "Mining", minimumScore = 500000.0, collectionId = "COAL"),
+    fallbackBoard(
+        "bestiary-glacite-walker", "Glacite Walker Kills", "Glacite Walker", "Bestiary",
+        minimumScore = 20.0, bestiaryId = "mining_3:glacite_walker",
+    ),
     fallbackBoard("farmingweight", "Farming Weight", "Farming Weight", "General", EliteScoreDataType.DECIMAL, minimumScore = 500.0),
     fallbackBoard("skyblockxp", "Skyblock Level", "Skyblock Level", "General", EliteScoreDataType.DECIMAL, minimumScore = 5000.0),
 )

@@ -110,6 +110,9 @@ internal object SkyBlockMobTracker {
         }
     }
 
+    fun isDeathConfirmed(entityUuid: UUID): Boolean =
+        mobs.values.any { mob -> mob.entityUuid == entityUuid && mob.deathConfirmed }
+
     private fun refresh() {
         val now = System.currentTimeMillis()
         val serverName = currentServerName()
