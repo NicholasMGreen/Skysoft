@@ -46,5 +46,8 @@ object SkysoftMoulConfigGuis {
         processor.registerConfigEditor(ConfigEditorTrackerItems::class.java) { option, _ ->
             TrackerItemsEditor(option)
         }
+        processor.registerConfigEditor(ConfigEditorEliteBoard::class.java) { option, _ ->
+            EliteLeaderboardBoardEditor(option)
+        }
     }
 }

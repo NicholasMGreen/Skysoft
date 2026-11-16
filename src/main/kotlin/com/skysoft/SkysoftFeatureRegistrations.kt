@@ -11,7 +11,9 @@ import com.skysoft.data.hypixel.SkyBlockCookieBuffApi
 import com.skysoft.data.hypixel.SkyBlockProfileApi
 import com.skysoft.data.hypixel.TabListApi
 import com.skysoft.data.skyblock.AttributeShardCatalog
+import com.skysoft.data.skyblock.EliteLeaderboardCatalog
 import com.skysoft.data.skyblock.EliteLeaderboardClient
+import com.skysoft.data.skyblock.EliteLocalProgress
 import com.skysoft.data.skyblock.GardenPestState
 import com.skysoft.data.skyblock.MayorPerkApi
 import com.skysoft.data.skyblock.SafariZoneState
@@ -89,6 +91,7 @@ import com.skysoft.features.inventory.slots.registerSlotBindingStorage
 import com.skysoft.features.loot.RareLootChatFeatures
 import com.skysoft.features.mining.MiningAbilityCooldownDisplay
 import com.skysoft.features.misc.DayDisplay
+import com.skysoft.features.misc.EliteLeaderboardOverlay
 import com.skysoft.features.misc.ForIntrests
 import com.skysoft.features.misc.KeepTerrainLoaded
 import com.skysoft.features.misc.HideSillyButtons
@@ -131,7 +134,6 @@ import com.skysoft.features.screenshot.ScreenshotCapturePreview
 import com.skysoft.features.screenshot.ScreenshotManager
 import com.skysoft.features.slayer.BlazeAttunementHighlighting
 import com.skysoft.features.slayer.SlayerBossAlerts
-import com.skysoft.features.slayer.SlayerLeaderboardOverlay
 import com.skysoft.features.slayer.SlayerMinibossAlert
 import com.skysoft.features.slayer.SlayerTargetHighlighting
 import com.skysoft.features.slayer.SlayerTimeToKill
@@ -180,7 +182,9 @@ internal object SkysoftFeatureRegistrations {
         register("SkyBlock Event Schedule", SkyBlockEventScheduleApi::register)
         register("SkyBlock Event State", SkyBlockEventState::register)
         register("Slayer Quest State", SlayerQuestState::register)
+        register("Elite Leaderboard Catalog", EliteLeaderboardCatalog::register)
         register("Elite Leaderboard Client", EliteLeaderboardClient::register)
+        register("Elite Leaderboard Local Progress", EliteLocalProgress::register)
         register("SkyBlock Price Data", SkyBlockPriceData::register)
         register("SkyBlock Data Repository", SkyBlockDataRepository::register)
         register("Entity Highlight Renderer", EntityHighlightRenderer::register)
@@ -253,6 +257,7 @@ internal object SkysoftFeatureRegistrations {
         register("Real Time Display", RealTimeDisplay::register)
         register("Server TPS Provider", ServerTpsProvider::register)
         register("Server Info Display", ServerInfoDisplay::register)
+        register("Elite Leaderboard", EliteLeaderboardOverlay::register)
         register("Spotify Authentication", SpotifyAuthentication::register)
         register("Spotify Display", SpotifyDisplay::register)
         register("Mouse Lock", MouseLock::register)
@@ -293,7 +298,6 @@ internal object SkysoftFeatureRegistrations {
         register("Slayer Target Highlighting", SlayerTargetHighlighting::register)
         register("Blaze Attunement Highlighting", BlazeAttunementHighlighting::register)
         register("Slayer Time to Kill", SlayerTimeToKill::register)
-        register("Slayer Leaderboard", SlayerLeaderboardOverlay::register)
         register("Sea Creature Catch Messages", SeaCreatureCatchMessages::register)
         register("Fishing Hotspot Sharing", FishingHotspotSharing::register)
         register("Fishing Hotspot Radar", FishingHotspotRadar::register)

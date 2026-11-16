@@ -78,4 +78,13 @@ class InformationDisplaysConfig {
     @field:Expose
     @field:Category(name = "Server Info Display", desc = "Show FPS, TPS, and ping.")
     val serverInfoDisplay = ServerInfoDisplayConfig()
+
+    @JvmField
+    @field:Expose
+    @field:ConfigGames(SKYBLOCK)
+    @field:Category(
+        name = "Elite Leaderboard",
+        desc = "Show your rank and the player ahead on any Elite SkyBlock leaderboard (https://eliteskyblock.com/).",
+    )
+    val eliteLeaderboard = EliteLeaderboardConfig()
 }

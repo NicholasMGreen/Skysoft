@@ -3,7 +3,7 @@ package com.skysoft.config
 import com.google.gson.JsonObject
 
 internal object SkysoftConfigMigrations {
-    const val CURRENT_CONFIG_MIGRATION_VERSION = 27
+    const val CURRENT_CONFIG_MIGRATION_VERSION = 28
 
     fun apply(json: JsonObject) {
         val migrationVersion = json.get(CONFIG_MIGRATION_VERSION_FIELD)
@@ -46,10 +46,17 @@ internal object SkysoftConfigMigrations {
             )
         }
         if (migrationVersion < CATEGORY_LAYOUT_VERSION) ConfigCategoryLayoutMigration.apply(json)
+        applyPostLayoutMigrations(json, migrationVersion)
+        json.addProperty(CONFIG_MIGRATION_VERSION_FIELD, CURRENT_CONFIG_MIGRATION_VERSION)
+    }
+
+    private fun applyPostLayoutMigrations(json: JsonObject, migrationVersion: Int) {
         if (migrationVersion < KEYBIND_NUMBERING_VERSION) {
             json.addProperty(KEYBIND_NUMBERING_FIELD, KeybindNumbering.GLFW.name)
         }
-        json.addProperty(CONFIG_MIGRATION_VERSION_FIELD, CURRENT_CONFIG_MIGRATION_VERSION)
+        if (migrationVersion < ELITE_LEADERBOARD_GENERALIZATION_VERSION) {
+            migrateSlayerLeaderboardToGeneral(json)
+        }
     }
 
     private fun migrateVanillaUiCategory(json: JsonObject) {
@@ -133,6 +140,7 @@ internal object SkysoftConfigMigrations {
     private const val SETTINGS_APPEARANCE_ACCORDIONS_VERSION = 25
     private const val CATEGORY_LAYOUT_VERSION = 26
     private const val KEYBIND_NUMBERING_VERSION = 27
+    private const val ELITE_LEADERBOARD_GENERALIZATION_VERSION = 28
     private const val KEYBIND_NUMBERING_FIELD = "keybindNumbering"
     private const val SKYBLOCK_MENU_DROP_FIX_FIELD = "preventSkyBlockMenuOpeningOnInventoryDrop"
 }
@@ -335,3 +343,29 @@ private fun migratePriceTooltipCustomization(json: JsonObject) {
         settingsJson.add("legacyBazaarPriceType", legacyType)
     }
 }
+
+private fun migrateSlayerLeaderboardToGeneral(json: JsonObject) {
+    val slayer = json.getObjectOrNull("slayer") ?: return
+    val legacy = slayer.remove("leaderboard").objectOrNull() ?: return
+    val info = json.getOrCreateObject("gui", "information")
+    if (info.has("eliteLeaderboard")) return
+    legacy.getObjectOrNull("settings")?.let { settings ->
+        val enumName = settings.remove("board")?.takeIf { it.isJsonPrimitive }?.asString
+        if (!settings.has("boardId") && enumName != null) {
+            SLAYER_BOARD_ENUM_TO_ID[enumName]?.let { settings.addProperty("boardId", it) }
+        }
+        settings.moveFieldInto(settings, "followActiveQuest", "followActiveSlayerQuest")
+        settings.moveFieldInto(settings, "trackLocalXp", "trackLocalProgress")
+    }
+    info.add("eliteLeaderboard", legacy)
+}
+
+private val SLAYER_BOARD_ENUM_TO_ID = mapOf(
+    "ZOMBIE" to "zombie-slayer",
+    "SPIDER" to "spider-slayer",
+    "WOLF" to "wolf-slayer",
+    "ENDERMAN" to "enderman-slayer",
+    "BLAZE" to "blaze-slayer",
+    "VAMPIRE" to "vampire-slayer",
+    "TOTAL" to "slayer-xp",
+)

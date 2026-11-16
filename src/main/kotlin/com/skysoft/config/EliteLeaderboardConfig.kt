@@ -2,23 +2,29 @@ package com.skysoft.config
 
 import com.google.gson.annotations.Expose
 import com.skysoft.config.core.HudPosition
-import com.skysoft.data.skyblock.SkyBlockSlayerType
+import com.skysoft.data.skyblock.DEFAULT_ELITE_BOARD_ID
+import com.skysoft.data.skyblock.EliteLeaderboardCatalog
 import com.skysoft.utils.BrowserUtilities
+import com.skysoft.utils.MinecraftClient
 import io.github.notenoughupdates.moulconfig.ChromaColour
 import io.github.notenoughupdates.moulconfig.annotations.Accordion
 import io.github.notenoughupdates.moulconfig.annotations.ConfigEditorBoolean
 import io.github.notenoughupdates.moulconfig.annotations.ConfigEditorButton
 import io.github.notenoughupdates.moulconfig.annotations.ConfigEditorColour
-import io.github.notenoughupdates.moulconfig.annotations.ConfigEditorDropdown
 import io.github.notenoughupdates.moulconfig.annotations.ConfigOption
 import io.github.notenoughupdates.moulconfig.observer.Property
+import io.github.notenoughupdates.moulconfig.processor.ProcessedOption
 
-class SlayerLeaderboardConfig {
+@Target(AnnotationTarget.FIELD)
+@Retention(AnnotationRetention.RUNTIME)
+annotation class ConfigEditorEliteBoard
+
+class EliteLeaderboardConfig {
     @JvmField
     @field:Expose
     @field:ConfigOption(
         name = "Enabled",
-        desc = "Show your slayer XP rank and the player ahead from Elite SkyBlock (https://eliteskyblock.com/).",
+        desc = "Show your rank and the player ahead on any Elite SkyBlock leaderboard (https://eliteskyblock.com/).",
     )
     @field:MainFeatureToggle
     @field:ConfigEditorBoolean
@@ -26,15 +32,15 @@ class SlayerLeaderboardConfig {
 
     @JvmField
     @field:Expose
-    @field:ConfigOption(name = "Settings", desc = "Choose which slayer leaderboard is shown.")
+    @field:ConfigOption(name = "Settings", desc = "Choose which Elite SkyBlock leaderboard is shown.")
     @field:Accordion
-    val settings = SlayerLeaderboardSettingsConfig()
+    val settings = EliteLeaderboardSettingsConfig()
 
     @JvmField
     @field:Expose
     @field:ConfigOption(name = "Details", desc = "Customize the leaderboard overlay appearance.")
     @field:Accordion
-    val details = SlayerLeaderboardDetailsConfig()
+    val details = EliteLeaderboardDetailsConfig()
 
     @JvmField
     @field:Expose
@@ -46,32 +52,34 @@ class SlayerLeaderboardConfig {
     }
 }
 
-class SlayerLeaderboardSettingsConfig {
+class EliteLeaderboardSettingsConfig {
     @JvmField
     @field:Expose
-    @field:ConfigOption(name = "Board", desc = "Choose which Elite SkyBlock slayer leaderboard to display.")
-    @field:ConfigEditorDropdown
-    var board = EliteSlayerBoard.BLAZE
+    @field:ConfigOption(
+        name = "Leaderboard",
+        desc = "Choose which Elite SkyBlock leaderboard to display (e.g. Pest Kills, Blaze Slayer XP, Farming Weight).",
+    )
+    @field:ConfigEditorEliteBoard
+    var boardId = DEFAULT_ELITE_BOARD_ID
 
     @JvmField
     @field:Expose
     @field:ConfigOption(
-        name = "Follow Active Quest",
-        desc = "Switch to the leaderboard matching your active slayer quest on the scoreboard.",
+        name = "Follow Active Slayer Quest",
+        desc = "Temporarily switch to the matching slayer leaderboard while a slayer quest is on your scoreboard.",
     )
     @field:ConfigEditorBoolean
-    var followActiveQuest = false
+    var followActiveSlayerQuest = false
 
     @JvmField
     @field:Expose
     @field:ConfigOption(
-        name = "Track Local Slayer XP",
-        desc = "Add Slayer XP locally on each quest completion between 10-minute Elite SkyBlock fetches. " +
-            "Caches 20 upcoming players locally, refreshes 20 ahead at your local XP when Elite lags behind, " +
-            "and updates your rank and target as you pass them.",
+        name = "Track Local Progress",
+        desc = "Add local gains (Slayer XP, Garden Pest kills, Skill XP) between 10-minute Elite SkyBlock fetches. " +
+            "Caches 20 upcoming entries locally and queries 20 ahead at your local score when Elite lags behind.",
     )
     @field:ConfigEditorBoolean
-    var trackLocalXp = true
+    var trackLocalProgress = true
 
     @JvmField
     @field:ConfigOption(
@@ -79,10 +87,10 @@ class SlayerLeaderboardSettingsConfig {
         desc = "Powered by Elite SkyBlock. Open the selected leaderboard at https://eliteskyblock.com/.",
     )
     @field:ConfigEditorButton(buttonText = "Open")
-    val openLeaderboard = Runnable { BrowserUtilities.tryOpen(board.url()) }
+    val openLeaderboard = Runnable { BrowserUtilities.tryOpen(EliteLeaderboardCatalog.info(boardId).url()) }
 }
 
-class SlayerLeaderboardDetailsConfig {
+class EliteLeaderboardDetailsConfig {
     @JvmField
     @field:Expose
     @field:ConfigOption(name = "Background", desc = "Draw a background behind the overlay.")
@@ -97,7 +105,7 @@ class SlayerLeaderboardDetailsConfig {
 
     @JvmField
     @field:Expose
-    @field:ConfigOption(name = "Number Color", desc = "Color used for XP and gap numbers.")
+    @field:ConfigOption(name = "Number Color", desc = "Color used for score and gap numbers.")
     @field:ConfigEditorColour
     val numberColor: Property<ChromaColour> = Property.of(ChromaColour.fromRGB(255, 255, 85, 0, 255))
 
@@ -114,28 +122,31 @@ class SlayerLeaderboardDetailsConfig {
     val nameColor: Property<ChromaColour> = Property.of(ChromaColour.fromRGB(85, 255, 255, 0, 255))
 }
 
-enum class EliteSlayerBoard(
-    val id: String,
-    val shortLabel: String,
-    val slayerType: SkyBlockSlayerType?,
-) {
-    ZOMBIE("zombie-slayer", "Zombie Slayer XP", SkyBlockSlayerType.ZOMBIE),
-    SPIDER("spider-slayer", "Spider Slayer XP", SkyBlockSlayerType.SPIDER),
-    WOLF("wolf-slayer", "Wolf Slayer XP", SkyBlockSlayerType.WOLF),
-    ENDERMAN("enderman-slayer", "Enderman Slayer XP", SkyBlockSlayerType.ENDERMAN),
-    BLAZE("blaze-slayer", "Blaze Slayer XP", SkyBlockSlayerType.BLAZE),
-    VAMPIRE("vampire-slayer", "Vampire Slayer XP", SkyBlockSlayerType.VAMPIRE),
-    TOTAL("slayer-xp", "Slayer XP", null),
-    ;
+internal class EliteLeaderboardBoardEditor(option: ProcessedOption) :
+    SkysoftStatusButtonEditor(option, "leaderboard elite board pest slayer farming skill collection bestiary") {
+    init {
+        EliteLeaderboardCatalog.ensureLoaded()
+    }
 
-    fun url(): String = "$ELITE_LEADERBOARD_BASE_URL/$id"
+    private fun currentBoardId(): String =
+        (option.get() as? String).orEmpty().ifBlank { DEFAULT_ELITE_BOARD_ID }
 
-    override fun toString(): String = shortLabel
+    override fun statusText(): String =
+        EliteLeaderboardCatalog.info(currentBoardId()).displayTitle()
 
-    companion object {
-        private const val ELITE_LEADERBOARD_BASE_URL = "https://eliteskyblock.com/leaderboard"
+    override fun statusColor(): Int = STATUS_COLOR
 
-        fun fromSlayerType(slayerType: SkyBlockSlayerType): EliteSlayerBoard =
-            entries.firstOrNull { it.slayerType == slayerType } ?: BLAZE
+    override fun buttonText(): String = "Browse"
+
+    override fun click() {
+        val current = currentBoardId()
+        EliteLeaderboardPickerScreen.open(MinecraftClient.screen(), current) { selectedBoardId ->
+            option.set(selectedBoardId)
+            option.explicitNotifyChange()
+        }
+    }
+
+    private companion object {
+        val STATUS_COLOR = 0xFFFFAA00.toInt()
     }
 }
