@@ -27,6 +27,7 @@ object EliteLeaderboardClient {
     private val profileSchedules = mutableMapOf<String, RefreshSchedule>()
     private val snapshots = mutableMapOf<RankLookupKey, EliteLeaderboardSnapshot>()
     private val rankSchedules = mutableMapOf<RankLookupKey, RefreshSchedule>()
+    private val exhaustionSchedules = mutableMapOf<RankLookupKey, RefreshSchedule>()
     private val localOffsets = mutableMapOf<RankLookupKey, Double>()
 
     fun register() {
@@ -71,11 +72,17 @@ object EliteLeaderboardClient {
         val playerUuid = currentPlayerUuid() ?: return
         val profileName = SkyBlockProfileApi.currentProfileKey ?: return
         val profileId = profilesByPlayer[playerUuid]?.get(profileName) ?: return
+        val activeKey = lookupKey(playerUuid, profileId, EliteLeaderboardCatalog.info(activeBoardId()))
+        val now = System.currentTimeMillis()
         for (boardId in boardIds) {
             val info = EliteLeaderboardCatalog.info(boardId)
             val key = lookupKey(playerUuid, profileId, info)
             if (key in snapshots) {
                 localOffsets[key] = (localOffsets[key] ?: 0.0) + delta
+                if (key == activeKey && HypixelLocationState.inSkyBlock && isExhausted(key)) {
+                    val exhaustionSchedule = exhaustionSchedules.getOrPut(key, ::RefreshSchedule)
+                    if (exhaustionSchedule.isDue(now)) fetchRank(key, info)
+                }
             }
         }
     }
@@ -94,8 +101,12 @@ object EliteLeaderboardClient {
         }
         val info = EliteLeaderboardCatalog.info(activeBoardId())
         val key = lookupKey(playerUuid, profileId, info)
+        val now = System.currentTimeMillis()
         val schedule = rankSchedules.getOrPut(key, ::RefreshSchedule)
-        if (schedule.isDue(System.currentTimeMillis())) fetchRank(key, info)
+        val exhaustionSchedule = exhaustionSchedules.getOrPut(key, ::RefreshSchedule)
+        if (schedule.isDue(now) || (isExhausted(key) && exhaustionSchedule.isDue(now))) {
+            fetchRank(key, info)
+        }
     }
 
     private fun fetchProfilesIfDue(playerUuid: String) {
@@ -120,6 +131,7 @@ object EliteLeaderboardClient {
 
     private fun fetchRank(key: RankLookupKey, info: EliteLeaderboardInfo) {
         val schedule = rankSchedules.getOrPut(key, ::RefreshSchedule)
+        val exhaustionSchedule = exhaustionSchedules.getOrPut(key, ::RefreshSchedule)
         val url = buildRankUrl(key, info)
         rankSlots.startIfIdle(
             key,
@@ -132,11 +144,24 @@ object EliteLeaderboardClient {
                 reconcileLocalOffset(key, snapshots[key], snapshot)
                 snapshots[key] = snapshot
                 schedule.schedule(now, REFRESH_INTERVAL_MILLIS)
+                exhaustionSchedule.schedule(now, EXHAUSTION_REFRESH_COOLDOWN_MILLIS)
             } else if (error?.isCancellationFailure() != true) {
                 schedule.schedule(now, FAILURE_RETRY_MILLIS)
+                exhaustionSchedule.schedule(now, EXHAUSTION_REFRESH_COOLDOWN_MILLIS)
                 SkysoftMod.LOGGER.warn("Failed to refresh Elite SkyBlock leaderboard ${info.id}", error)
             }
         }
+    }
+
+    private fun isExhausted(key: RankLookupKey): Boolean {
+        if (!config.settings.trackLocalProgress) return false
+        val snapshot = snapshots[key] ?: return false
+        val lastAhead = snapshot.upcomingPlayers.lastOrNull() ?: return false
+        val localGain = localOffsets[key] ?: 0.0
+        return snapshot.isRanked &&
+            lastAhead.rank > 1 &&
+            localGain > PROGRESS_EPSILON &&
+            (snapshot.amount + localGain) >= lastAhead.amount
     }
 
     private fun buildRankUrl(key: RankLookupKey, info: EliteLeaderboardInfo): String {
@@ -199,6 +224,7 @@ object EliteLeaderboardClient {
         Minecraft.getInstance().player?.uuid?.toString()?.replace("-", "")
 
     private const val REFRESH_INTERVAL_MILLIS = 10L * 60L * 1000L
+    private const val EXHAUSTION_REFRESH_COOLDOWN_MILLIS = 60L * 1000L
     private const val FAILURE_RETRY_MILLIS = 60L * 1000L
     private const val UPCOMING_COUNT = 20
     private const val PROGRESS_EPSILON = 1e-6
