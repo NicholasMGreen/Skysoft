@@ -66,7 +66,12 @@ object SkyBlockProfileApi {
     private fun handleChat(message: String) {
         val clean = message.cleanSkyBlockText().lowercase(Locale.US)
         val prefix = profileMessagePrefixes.firstOrNull(clean::startsWith) ?: return
-        setProfile(clean.removePrefix(prefix).removeSuffix("(co-op)").trim())
+        // Strip the repeat counter first: Minecraft appends it after any `(co-op)` marker.
+        val name = clean.removePrefix(prefix)
+            .replace(REPEAT_SUFFIX, "")
+            .removeSuffix("(co-op)")
+            .trim()
+        setProfile(name)
     }
 
     private fun readTabProfile() {
@@ -84,6 +89,9 @@ object SkyBlockProfileApi {
 
     private val profileMessagePrefixes = listOf("your profile was changed to:", "you are playing on profile:")
     private val profileTabPattern = Regex("""Profile: ([\w\s]+)(?:[ ♲Ⓑ☀]+)?""")
+
+    /** Minecraft appends a repeat counter to compressed chat lines, e.g. `Pineapple (×7)`. */
+    private val REPEAT_SUFFIX = Regex("""\s*\((?:\u00d7|x)\d+\)$""")
 }
 
 data class SkyBlockProfileId(

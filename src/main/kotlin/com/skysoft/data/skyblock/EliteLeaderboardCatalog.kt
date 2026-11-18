@@ -45,8 +45,10 @@ object EliteLeaderboardCatalog {
             val completedAt = System.currentTimeMillis()
             if (error == null && parsed != null) {
                 catalog = parsed
+                version++
                 status = EliteCatalogStatus.LOADED
                 schedule.schedule(completedAt, CATALOG_REFRESH_INTERVAL_MILLIS)
+                SkysoftMod.LOGGER.info("Elite leaderboard catalog loaded: {} boards", parsed.size)
             } else if (error?.isCancellationFailure() != true) {
                 if (catalog.isEmpty()) status = EliteCatalogStatus.FAILED
                 schedule.schedule(completedAt, FAILURE_RETRY_MILLIS)
@@ -55,15 +57,38 @@ object EliteLeaderboardCatalog {
         }
     }
 
+    /**
+     * Metadata for [boardId].
+     *
+     * The fallback table is consulted for *labels* only, and a board that is in neither source is
+     * reported as [EliteLeaderboardInfo.isKnown] `false` instead of being given fabricated metadata.
+     * Fabricating it is what previously made a board look fetchable while silently disabling its
+     * local tracking.
+     */
     fun info(boardId: String): EliteLeaderboardInfo {
         val normalized = normalizeEliteBoardId(boardId)
-        return catalog[normalized] ?: FALLBACK_BOARDS[normalized] ?: syntheticBoardInfo(normalized)
+        return catalog[normalized] ?: FALLBACK_BOARDS[normalized] ?: unknownBoardInfo(normalized)
     }
 
     fun findOrNull(boardId: String): EliteLeaderboardInfo? {
         val normalized = normalizeEliteBoardId(boardId)
         return catalog[normalized] ?: FALLBACK_BOARDS[normalized]
     }
+
+    /** Where [boardId]'s metadata came from, for diagnostics. */
+    fun sourceOf(boardId: String): String {
+        val normalized = normalizeEliteBoardId(boardId)
+        return when {
+            catalog.containsKey(normalized) -> "catalog"
+            FALLBACK_BOARDS.containsKey(normalized) -> "fallback"
+            else -> "unknown"
+        }
+    }
+
+    /** Increments whenever the parsed catalog is replaced, so derived indexes can invalidate. */
+    @Volatile
+    var version: Long = 0L
+        private set
 
     fun entries(): List<EliteLeaderboardInfo> {
         val source = catalog.ifEmpty { FALLBACK_BOARDS }
@@ -76,19 +101,6 @@ object EliteLeaderboardCatalog {
 
     fun categories(): List<String> =
         entries().map(EliteLeaderboardInfo::category).distinct()
-
-    fun boardsForCollection(collectionId: String): List<String> {
-        val canonical = canonicalSkyBlockItemId(collectionId)
-        val source = catalog.ifEmpty { FALLBACK_BOARDS }
-        return source.values
-            .filter { it.collectionId == canonical }
-            .map(EliteLeaderboardInfo::id)
-    }
-
-    fun bestiaryBoards(): List<EliteLeaderboardInfo> {
-        val source = catalog.ifEmpty { FALLBACK_BOARDS }
-        return source.values.filter { it.bestiaryId != null && it.category == "Bestiary" }
-    }
 
     internal fun <T> fetchJson(url: String, parse: (String) -> T): CompletableFuture<T> {
         val request = HttpRequest.newBuilder(URI.create(url))
@@ -119,10 +131,15 @@ object EliteLeaderboardCatalog {
     }
 
     internal const val API_BASE_URL = "https://api.eliteskyblock.com"
-    internal const val REQUEST_TIMEOUT_SECONDS = 15L
+    internal const val REQUEST_TIMEOUT_SECONDS = 20L
     internal const val HTTP_SUCCESS_MIN = 200
     internal const val HTTP_SUCCESS_MAX = 299
-    private const val MAXIMUM_CATALOG_RESPONSE_BYTES = 2L * 1024L * 1024L
+
+    /**
+     * `/profiles/{uuid}` grows with account history and has been observed at ~2.8 MB for an old
+     * account, so the shared 2 MB cap silently failed profile resolution for exactly those players.
+     */
+    private const val MAXIMUM_CATALOG_RESPONSE_BYTES = 16L * 1024L * 1024L
     private const val CATALOG_REFRESH_INTERVAL_MILLIS = 6L * 60L * 60L * 1000L
     private const val FAILURE_RETRY_MILLIS = 60L * 1000L
 }
@@ -171,6 +188,8 @@ data class EliteLeaderboardInfo(
     val intervalType: EliteIntervalType,
     val collectionId: String? = null,
     val bestiaryId: String? = null,
+    /** False when the board is in neither the live catalog nor the fallback table. */
+    val isKnown: Boolean = true,
 ) {
     fun url(): String = "$ELITE_LEADERBOARD_BASE_URL/$id"
 
@@ -196,13 +215,19 @@ internal fun normalizeEliteBoardId(boardId: String): String =
 
 internal const val DEFAULT_ELITE_BOARD_ID = "blaze-slayer"
 
-private fun syntheticBoardInfo(boardId: String): EliteLeaderboardInfo {
+/**
+ * Placeholder for a board id in neither the live catalog nor the fallback table.
+ *
+ * Marked [EliteLeaderboardInfo.isKnown] `false` so local tracking and formatting can react honestly
+ * instead of silently pretending the board supports a signal it does not have.
+ */
+private fun unknownBoardInfo(boardId: String): EliteLeaderboardInfo {
     val interval = when {
-        boardId.endsWith("-monthly") -> EliteIntervalType.MONTHLY
-        boardId.endsWith("-weekly") -> EliteIntervalType.WEEKLY
+        boardId.endsWith(MONTHLY_SUFFIX) -> EliteIntervalType.MONTHLY
+        boardId.endsWith(WEEKLY_SUFFIX) -> EliteIntervalType.WEEKLY
         else -> EliteIntervalType.CURRENT
     }
-    val baseId = boardId.removeSuffix("-monthly").removeSuffix("-weekly")
+    val baseId = eliteBoardBaseId(boardId)
     val words = baseId.split('-').filter(String::isNotEmpty).joinToString(" ") { part ->
         part.replaceFirstChar { it.titlecase(Locale.ROOT) }
     }.ifEmpty { boardId }
@@ -215,6 +240,7 @@ private fun syntheticBoardInfo(boardId: String): EliteLeaderboardInfo {
         minimumScore = 0.0,
         scoreDataType = EliteScoreDataType.LONG,
         intervalType = interval,
+        isKnown = false,
     )
 }
 
@@ -240,7 +266,8 @@ private fun parseLeaderboardInfo(id: String, obj: JsonObject): EliteLeaderboardI
     val intervalType = EliteIntervalType.fromApi(obj.catalogString("intervalType"))
     val rawCollection = obj.catalogString("collection")
         ?: obj.catalogString("itemId")?.takeIf { category == "Milestones" }
-    val collectionId = rawCollection?.let(::canonicalSkyBlockItemId)
+    // Kept raw (`INK_SACK:3`); the router folds both sides through eliteCollectionJoinKey.
+    val collectionId = rawCollection
     val bestiaryId = obj.catalogString("bestiary")
     return EliteLeaderboardInfo(
         id = id,

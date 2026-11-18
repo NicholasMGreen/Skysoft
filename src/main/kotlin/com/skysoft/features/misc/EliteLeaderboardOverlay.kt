@@ -74,6 +74,9 @@ object EliteLeaderboardOverlay {
 
         val rows = buildList {
             add(firstLine(boardInfo, snapshot, labelColor, numberColor, behindColor, nameColor))
+            // The "ahead" row only makes sense once ranked. For an unranked player Elite returns the
+            // board's last entry rather than the neighbour above, so showing it would report a gap
+            // against an unrelated player.
             if (snapshot.isRanked) {
                 snapshot.ahead?.let { ahead ->
                     add(secondLine(boardInfo.scoreDataType, snapshot.amount, ahead, numberColor, behindColor, nameColor))
@@ -92,18 +95,53 @@ object EliteLeaderboardOverlay {
         nameColor: Int,
     ): GuiRenderable {
         val labelSegment = StringRenderable("${boardInfo.shortTitle}: ", color = labelColor)
-        if (snapshot.amount < snapshot.minAmount) {
-            return horizontalLayout(listOf(labelSegment, StringRenderable("Not ranked", color = behindColor)))
-        }
+        if (snapshot.isRanked) return rankedLine(boardInfo, snapshot, labelSegment, numberColor, behindColor, nameColor)
+        return unrankedLine(boardInfo, snapshot, labelSegment, numberColor, behindColor)
+    }
+
+    private fun rankedLine(
+        boardInfo: EliteLeaderboardInfo,
+        snapshot: EliteLeaderboardSnapshot,
+        labelSegment: GuiRenderable,
+        numberColor: Int,
+        behindColor: Int,
+        nameColor: Int,
+    ): GuiRenderable {
         val formattedAmount = formatScore(snapshot.amount, boardInfo.scoreDataType)
-        val segments = buildList {
-            add(labelSegment)
-            add(StringRenderable(formattedAmount, color = numberColor))
-            if (snapshot.rank > 0) {
-                add(StringRenderable(" [", color = behindColor))
-                add(StringRenderable("#${snapshot.rank.addSeparators()}", color = nameColor))
-                add(StringRenderable("]", color = behindColor))
-            }
+        return horizontalLayout(
+            listOf(
+                labelSegment,
+                StringRenderable(formattedAmount, color = numberColor),
+                StringRenderable(" [", color = behindColor),
+                StringRenderable("#${snapshot.rank.addSeparators()}", color = nameColor),
+                StringRenderable("]", color = behindColor),
+            ),
+        )
+    }
+
+    /**
+     * Elite reports `amount: 0` and `rank: -1` for a player below a board's minimum score, so the
+     * board's real total is genuinely unknown. Show only what is actually known: that the player is
+     * unranked, the score needed to qualify, and any progress made locally this session.
+     */
+    private fun unrankedLine(
+        boardInfo: EliteLeaderboardInfo,
+        snapshot: EliteLeaderboardSnapshot,
+        labelSegment: GuiRenderable,
+        numberColor: Int,
+        behindColor: Int,
+    ): GuiRenderable {
+        val segments = mutableListOf(labelSegment)
+        if (snapshot.amount > 0.0) {
+            val localGain = formatScore(snapshot.amount, boardInfo.scoreDataType)
+            segments += StringRenderable("+$localGain", color = numberColor)
+            segments += StringRenderable(" local", color = behindColor)
+        } else {
+            segments += StringRenderable("unranked", color = behindColor)
+        }
+        if (snapshot.minAmount > 0.0) {
+            val minimum = formatScore(snapshot.minAmount, boardInfo.scoreDataType)
+            segments += StringRenderable(" (min $minimum)", color = behindColor)
         }
         return horizontalLayout(segments)
     }

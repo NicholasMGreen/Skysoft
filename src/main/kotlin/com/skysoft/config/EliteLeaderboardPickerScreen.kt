@@ -1,10 +1,12 @@
 package com.skysoft.config
 
 import com.mojang.blaze3d.platform.InputConstants
+import com.skysoft.data.skyblock.EliteBoardSignal
 import com.skysoft.data.skyblock.EliteCatalogStatus
 import com.skysoft.data.skyblock.EliteIntervalType
 import com.skysoft.data.skyblock.EliteLeaderboardCatalog
 import com.skysoft.data.skyblock.EliteLeaderboardInfo
+import com.skysoft.data.skyblock.eliteBoardSignal
 import com.skysoft.data.skyblock.normalizeEliteBoardId
 import com.skysoft.gui.SkysoftEditorScreen
 import com.skysoft.utils.MinecraftClient
@@ -236,7 +238,11 @@ internal class EliteLeaderboardPickerScreen private constructor(
 
     private fun entryLabel(info: EliteLeaderboardInfo, font: net.minecraft.client.gui.Font, maxWidth: Int): String {
         val base = info.displayTitle()
-        val full = if (info.isProfileBoard) "$base [Profile]" else base
+        val tags = buildList {
+            if (info.isProfileBoard) add(PROFILE_TAG)
+            if (eliteBoardSignal(info) == EliteBoardSignal.NONE) add(SNAPSHOT_ONLY_TAG)
+        }
+        val full = if (tags.isEmpty()) base else "$base ${tags.joinToString(" ")}"
         return font.elide(full, maxWidth)
     }
 
@@ -328,6 +334,8 @@ internal class EliteLeaderboardPickerScreen private constructor(
 
     companion object {
         private const val ALL_CATEGORIES = "All"
+        private const val PROFILE_TAG = "[Profile]"
+        private const val SNAPSHOT_ONLY_TAG = "[Snapshot only]"
         private const val MAX_SEARCH_LENGTH = 80
         private const val PREFERRED_WIDTH = 360
         private const val PREFERRED_HEIGHT = 270

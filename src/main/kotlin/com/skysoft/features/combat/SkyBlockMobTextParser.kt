@@ -12,15 +12,28 @@ internal object SkyBlockMobTextParser {
         healthMatch(text)?.health
 
     fun parseName(text: String): String? {
-        val match = healthMatch(text) ?: return typedNamePattern.matchEntire(text)
-            ?.takeIf { CRITTER_TYPE_GLYPH in it.groupValues[1] }
-            ?.groups?.get("name")?.value?.trim()?.takeIf(String::isNotEmpty)
+        val match = healthMatch(text) ?: run {
+            // No health line on the nameplate. Take the whole label as the name rather than
+            // rejecting the mob: several Bestiary mobs (Ghosts among them) often show a bare name,
+            // and rejecting them means their kills are never tracked at all.
+            val typedName = typedNamePattern.matchEntire(text)
+                ?.takeIf { CRITTER_TYPE_GLYPH in it.groupValues[1] }
+                ?.groups?.get("name")?.value?.trim()?.takeIf(String::isNotEmpty)
+            return typedName ?: nameWithoutHealthLine(text)
+        }
         return levelPrefixPattern
             .replace(text.take(match.start).trim(), "")
             .trimStart { !it.isLetterOrDigit() }
             .trim()
             .takeIf(String::isNotEmpty)
     }
+
+    /** Strips a trailing level/tier marker from a nameplate that has no health segment. */
+    private fun nameWithoutHealthLine(text: String): String? = levelPrefixPattern
+        .replace(text.trim(), "")
+        .trimStart { !it.isLetterOrDigit() }
+        .trim()
+        .takeIf { it.isNotEmpty() && it.none(Char::isDigit) }
 
     private fun healthMatch(text: String): HealthMatch? {
         fullHealthPattern.find(text)?.let { match ->

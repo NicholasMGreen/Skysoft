@@ -17,18 +17,23 @@ import net.minecraft.client.Minecraft
 
 object EliteLeaderboardClient {
     private val config get() = SkysoftConfigGui.config().gui.information.eliteLeaderboard
-    private val profileSlots = KeyedAsyncRequestSlots<String, Map<String, String>>(
+    private val profileSlots = KeyedAsyncRequestSlots<String, EliteProfileIndex>(
         completionExecutor = Minecraft.getInstance(),
     )
     private val rankSlots = KeyedAsyncRequestSlots<RankLookupKey, EliteLeaderboardSnapshot>(
         completionExecutor = Minecraft.getInstance(),
     )
-    private val profilesByPlayer = mutableMapOf<String, Map<String, String>>()
+    private val profilesByPlayer = mutableMapOf<String, EliteProfileIndex>()
     private val profileSchedules = mutableMapOf<String, RefreshSchedule>()
     private val snapshots = mutableMapOf<RankLookupKey, EliteLeaderboardSnapshot>()
     private val rankSchedules = mutableMapOf<RankLookupKey, RefreshSchedule>()
     private val exhaustionSchedules = mutableMapOf<RankLookupKey, RefreshSchedule>()
-    private val localOffsets = mutableMapOf<RankLookupKey, Double>()
+
+    /**
+     * Gains observed before the profile id is known (a kill in the first seconds after a join, while
+     * `/profiles/{uuid}` is still in flight). Flushed once the profile resolves.
+     */
+    private val pendingGains = ElitePendingGains()
 
     fun register() {
         SkyBlockProfileApi.registerConsumer("Elite Leaderboard") { isEnabled() }
@@ -41,8 +46,12 @@ object EliteLeaderboardClient {
         SkysoftClientEvents.onEndTick("Elite Leaderboard tick", ::isEnabled) {
             refreshActiveIfDue()
         }
-        SkysoftClientEvents.onDisconnect("Elite Leaderboard disconnect", ::cancelInFlight)
+        SkysoftClientEvents.onDisconnect("Elite Leaderboard disconnect") {
+            cancelInFlight()
+            clearLocalProgress()
+        }
         SkysoftClientEvents.onClientStopping("Elite Leaderboard shutdown") { cancelInFlight() }
+        EliteSignalBus.subscribe(::onLocalGains)
     }
 
     internal fun isTrackingLocalProgress(): Boolean = isEnabled() && config.settings.trackLocalProgress
@@ -58,33 +67,67 @@ object EliteLeaderboardClient {
     internal fun snapshotFor(boardId: String): EliteLeaderboardSnapshot? {
         val playerUuid = currentPlayerUuid() ?: return null
         val profileName = SkyBlockProfileApi.currentProfileKey ?: return null
-        val profileId = profilesByPlayer[playerUuid]?.get(profileName) ?: return null
+        val profileId = profilesByPlayer[playerUuid]?.resolve(profileName) ?: return null
         val info = EliteLeaderboardCatalog.info(boardId)
         val key = lookupKey(playerUuid, profileId, info)
         val snapshot = snapshots[key] ?: return null
         if (!config.settings.trackLocalProgress) return snapshot.withoutAnchoredUpcoming()
-        val localGain = localOffsets[key] ?: 0.0
+        val localGain = EliteLocalOffsetStore.offsetFor(profileId, info.id)
         return snapshot.withLocalProgress(localGain)
     }
 
-    internal fun addLocalProgress(boardIds: Iterable<String>, delta: Double) {
-        if (!isTrackingLocalProgress() || delta <= 0.0) return
-        val playerUuid = currentPlayerUuid() ?: return
-        val profileName = SkyBlockProfileApi.currentProfileKey ?: return
-        val profileId = profilesByPlayer[playerUuid]?.get(profileName) ?: return
-        val activeKey = lookupKey(playerUuid, profileId, EliteLeaderboardCatalog.info(activeBoardId()))
-        val now = System.currentTimeMillis()
-        for (boardId in boardIds) {
-            val info = EliteLeaderboardCatalog.info(boardId)
-            val key = lookupKey(playerUuid, profileId, info)
-            if (key in snapshots) {
-                localOffsets[key] = (localOffsets[key] ?: 0.0) + delta
-                if (key == activeKey && HypixelLocationState.inSkyBlock && isExhausted(key)) {
-                    val exhaustionSchedule = exhaustionSchedules.getOrPut(key, ::RefreshSchedule)
-                    if (exhaustionSchedule.isDue(now)) fetchRank(key, info)
-                }
+    /**
+     * Applies locally observed gains.
+     *
+     * Every gain is recorded in [EliteLocalOffsetStore] whether or not the board has a snapshot yet,
+     * so a kill registered before the first fetch (or while another board is displayed) still counts.
+     */
+    private fun onLocalGains(gains: List<EliteBoardGain>) {
+        if (!isTrackingLocalProgress()) return
+        val profileId = resolvedProfileId()
+        if (profileId == null) {
+            gains.forEach { gain -> pendingGains.add(gain.boardId, gain.amount) }
+            return
+        }
+        val activeBoardId = activeBoardId()
+        for (gain in gains) {
+            val total = EliteLocalOffsetStore.add(profileId, gain.boardId, gain.amount)
+            val anchored = snapshots.keys.any { it.boardId == gain.boardId }
+            EliteLeaderboardDiagnostics.logLocalGain(gain, total, anchored)
+            if (gain.boardId == activeBoardId && HypixelLocationState.inSkyBlock) {
+                refreshIfExhausted(profileId, gain.boardId)
             }
         }
+    }
+
+    private fun resolvedProfileId(): String? {
+        val playerUuid = currentPlayerUuid() ?: return null
+        val profileName = SkyBlockProfileApi.currentProfileKey ?: return null
+        return profilesByPlayer[playerUuid]?.resolve(profileName)
+    }
+
+    /** Moves gains buffered while the profile was unresolved into the offset store. */
+    private fun flushPendingGains(profileId: String) {
+        if (pendingGains.isEmpty) return
+        pendingGains.drain().forEach { (boardId, amount) ->
+            EliteLocalOffsetStore.add(profileId, boardId, amount)
+        }
+    }
+
+    private fun refreshIfExhausted(profileId: String, boardId: String) {
+        val info = EliteLeaderboardCatalog.info(boardId)
+        val key = lookupKey(currentPlayerUuid() ?: return, profileId, info)
+        if (!isExhausted(key)) return
+        val schedule = exhaustionSchedules.getOrPut(key, ::RefreshSchedule)
+        if (schedule.isDue(System.currentTimeMillis())) fetchRank(key, info)
+    }
+
+    private fun clearLocalProgress() {
+        EliteLocalOffsetStore.clear()
+        pendingGains.clear()
+        snapshots.clear()
+        rankSchedules.clear()
+        exhaustionSchedules.clear()
     }
 
     private fun isEnabled(): Boolean = config.enabled
@@ -94,12 +137,13 @@ object EliteLeaderboardClient {
         EliteLeaderboardCatalog.ensureLoaded()
         val playerUuid = currentPlayerUuid() ?: return
         val profileName = SkyBlockProfileApi.currentProfileKey ?: return
-        val profileId = profilesByPlayer[playerUuid]?.get(profileName)
+        val profileId = profilesByPlayer[playerUuid]?.resolve(profileName)
         if (profileId == null) {
             fetchProfilesIfDue(playerUuid)
             return
         }
         val info = EliteLeaderboardCatalog.info(activeBoardId())
+        EliteLeaderboardDiagnostics.logActiveBinding(info)
         val key = lookupKey(playerUuid, profileId, info)
         val now = System.currentTimeMillis()
         val schedule = rankSchedules.getOrPut(key, ::RefreshSchedule)
@@ -115,12 +159,15 @@ object EliteLeaderboardClient {
         val url = "${EliteLeaderboardCatalog.API_BASE_URL}/profiles/$playerUuid"
         profileSlots.startIfIdle(
             playerUuid,
-            requestFactory = { EliteLeaderboardCatalog.fetchJson(url, ::parseProfilesMap) },
+            requestFactory = { EliteLeaderboardCatalog.fetchJson(url, ::parseProfilesResponse) },
         ) { profiles, error ->
             val now = System.currentTimeMillis()
             if (error == null && profiles != null) {
                 profilesByPlayer[playerUuid] = profiles
                 schedule.schedule(now, REFRESH_INTERVAL_MILLIS)
+                SkyBlockProfileApi.currentProfileKey?.let { name ->
+                    profiles.resolve(name)?.let(::flushPendingGains)
+                }
                 refreshActiveIfDue()
             } else if (error?.isCancellationFailure() != true) {
                 schedule.schedule(now, FAILURE_RETRY_MILLIS)
@@ -143,6 +190,12 @@ object EliteLeaderboardClient {
             if (error == null && snapshot != null) {
                 reconcileLocalOffset(key, snapshots[key], snapshot)
                 snapshots[key] = snapshot
+                EliteLeaderboardDiagnostics.logSnapshot(
+                    boardId = info.id,
+                    snapshot = snapshot,
+                    localGain = EliteLocalOffsetStore.offsetFor(key.profileId, info.id),
+                    source = EliteLeaderboardCatalog.sourceOf(info.id),
+                )
                 schedule.schedule(now, REFRESH_INTERVAL_MILLIS)
                 exhaustionSchedule.schedule(now, EXHAUSTION_REFRESH_COOLDOWN_MILLIS)
             } else if (error?.isCancellationFailure() != true) {
@@ -157,7 +210,7 @@ object EliteLeaderboardClient {
         if (!config.settings.trackLocalProgress) return false
         val snapshot = snapshots[key] ?: return false
         val lastAhead = snapshot.upcomingPlayers.lastOrNull() ?: return false
-        val localGain = localOffsets[key] ?: 0.0
+        val localGain = EliteLocalOffsetStore.offsetFor(key.profileId, key.boardId)
         return snapshot.isRanked &&
             lastAhead.rank > 1 &&
             localGain > PROGRESS_EPSILON &&
@@ -166,7 +219,11 @@ object EliteLeaderboardClient {
 
     private fun buildRankUrl(key: RankLookupKey, info: EliteLeaderboardInfo): String {
         val previous = snapshots[key]
-        val localGain = if (config.settings.trackLocalProgress) localOffsets[key] ?: 0.0 else 0.0
+        val localGain = if (config.settings.trackLocalProgress) {
+            EliteLocalOffsetStore.offsetFor(key.profileId, info.id)
+        } else {
+            0.0
+        }
         val baseUrl = if (info.isProfileBoard) {
             "${EliteLeaderboardCatalog.API_BASE_URL}/leaderboard/${info.id}/${key.profileId}"
         } else {
@@ -189,23 +246,12 @@ object EliteLeaderboardClient {
         previous: EliteLeaderboardSnapshot?,
         current: EliteLeaderboardSnapshot,
     ) {
-        if (previous == null) {
-            localOffsets.remove(key)
-            return
-        }
-        if (current.amount == previous.amount) return
-        if (current.amount < previous.amount) {
-            localOffsets.remove(key)
-            return
-        }
-        val previousOffset = localOffsets[key] ?: 0.0
-        val serverDelta = current.amount - previous.amount
-        val remainingOffset = (previousOffset - serverDelta).coerceAtLeast(0.0)
-        if (remainingOffset > PROGRESS_EPSILON) {
-            localOffsets[key] = remainingOffset
-        } else {
-            localOffsets.remove(key)
-        }
+        EliteLocalOffsetStore.reconcile(
+            profileId = key.profileId,
+            boardId = key.boardId,
+            previous = previous?.amount,
+            current = current.amount,
+        )
     }
 
     private fun cancelInFlight() {
@@ -259,6 +305,9 @@ internal data class EliteLeaderboardSnapshot(
     fun withLocalProgress(localGain: Double): EliteLeaderboardSnapshot {
         if (localGain <= 0.0) return this
         val updatedAmount = amount + localGain
+        // Unranked or below the minimum score: there is no rank to advance, but the local count is
+        // still real and must be shown. Previously this returned an unchanged snapshot, so a kill on
+        // a board the player has not yet qualified for never appeared at all.
         if (!isRanked) return copy(amount = updatedAmount)
         val nextIndex = upcomingPlayers.indexOfFirst { it.amount > updatedAmount }
         return when {
@@ -288,25 +337,6 @@ private data class RankLookupKey(
     val profileId: String,
     val boardId: String,
 )
-
-private fun parseProfilesMap(body: String): Map<String, String> {
-    val array = JsonParser.parseString(body).takeIf { it.isJsonArray }?.asJsonArray ?: return emptyMap()
-    val matched = linkedMapOf<String, Pair<String, Boolean>>()
-    array.asSequence()
-        .mapNotNull { it.takeIf { elem -> elem.isJsonObject }?.asJsonObject }
-        .forEach { obj ->
-            val profileId = obj.stringOrNull("profileId")
-            val profileName = obj.stringOrNull("profileName")?.trim()?.lowercase(Locale.US)
-            if (profileId != null && !profileName.isNullOrEmpty()) {
-                val selected = obj.get("selected")?.takeUnless { it.isJsonNull }?.asBoolean == true
-                val existing = matched[profileName]
-                if (existing == null || (selected && !existing.second)) {
-                    matched[profileName] = profileId to selected
-                }
-            }
-        }
-    return matched.mapValues { it.value.first }
-}
 
 private fun parseLeaderboardRank(boardId: String, body: String): EliteLeaderboardSnapshot {
     val json = JsonParser.parseString(body).asJsonObject

@@ -1,12 +1,10 @@
 package com.skysoft.features.combat
 
-import com.skysoft.data.SkyBlockIsland
 import com.skysoft.data.hypixel.HypixelLocationState
 import com.skysoft.data.hypixel.SkyBlockProfileApi
-import com.skysoft.data.skyblock.EliteLeaderboardCatalog
 import com.skysoft.data.skyblock.EliteLeaderboardClient
-import com.skysoft.data.skyblock.EliteLeaderboardInfo
-import com.skysoft.data.skyblock.SkyBlockBestiaryFamilies
+import com.skysoft.data.skyblock.EliteLocalSignal
+import com.skysoft.data.skyblock.EliteSignalBus
 import com.skysoft.data.skyblock.withoutSkyBlockMobModifierPrefix
 import com.skysoft.events.entity.ClientEntityMetadataEvent
 import com.skysoft.events.entity.ClientEntityMetadataEvents
@@ -17,7 +15,6 @@ import com.skysoft.events.input.ItemUseEvents
 import com.skysoft.utils.SkysoftClientEvents
 import com.skysoft.utils.WorldVec
 import com.skysoft.utils.location
-import java.util.Locale
 import java.util.UUID
 import net.minecraft.client.Minecraft
 import net.minecraft.world.entity.Entity
@@ -52,11 +49,8 @@ internal object EliteBestiaryKillTracker {
         SkysoftClientEvents.onDisconnect("Elite Bestiary disconnect reset") { clearTransient() }
     }
 
-    private fun isActive(): Boolean {
-        if (!EliteLeaderboardClient.isTrackingLocalProgress() || !HypixelLocationState.inSkyBlock) return false
-        val info = EliteLeaderboardCatalog.info(EliteLeaderboardClient.activeBoardId())
-        return info.bestiaryId != null && info.category == BESTIARY_CATEGORY
-    }
+    private fun isActive(): Boolean =
+        EliteLeaderboardClient.isTrackingLocalProgress() && HypixelLocationState.inSkyBlock
 
     private fun recordAttack(clickedEntity: Entity) {
         val now = System.currentTimeMillis()
@@ -207,35 +201,10 @@ internal object EliteBestiaryKillTracker {
         countedKills[mob.entityUuid] = now
         attackedMobs.remove(mob.entityUuid)
         damagedMobs.remove(mob.entityUuid)
-        val matchingBoards = matchingBestiaryBoards(mob.name, HypixelLocationState.currentIsland)
-        if (matchingBoards.isNotEmpty()) {
-            EliteLeaderboardClient.addLocalProgress(matchingBoards, 1.0)
-        }
-    }
-
-    private fun matchingBestiaryBoards(mobName: String, island: SkyBlockIsland?): List<String> {
-        val normalized = normalizeSkyBlockMobName(mobName).withoutSkyBlockMobModifierPrefix(ignoreCase = true)
-        val boards = EliteLeaderboardCatalog.bestiaryBoards()
-        val duplicateShorts = boards.groupingBy { it.shortTitle.lowercase(Locale.ROOT) }.eachCount()
-        return boards.mapNotNull { board ->
-            if (!matchesIslandScope(board, duplicateShorts, island)) return@mapNotNull null
-            val names = SkyBlockBestiaryFamilies.mobNames(listOf(board.shortTitle))
-            board.id.takeIf { names.any { it.equals(normalized, ignoreCase = true) } }
-        }
-    }
-
-    private fun matchesIslandScope(
-        board: EliteLeaderboardInfo,
-        duplicateShorts: Map<String, Int>,
-        island: SkyBlockIsland?,
-    ): Boolean {
-        if ((duplicateShorts[board.shortTitle.lowercase(Locale.ROOT)] ?: 0) <= 1) return true
-        val bestiaryId = board.bestiaryId ?: return true
-        return when {
-            bestiaryId.startsWith("dynamic:") -> island == SkyBlockIsland.PRIVATE_ISLAND
-            bestiaryId.startsWith("catacombs:") -> island == SkyBlockIsland.DUNGEONS
-            bestiaryId.startsWith("combat_3:") -> island == SkyBlockIsland.THE_END
-            else -> true
+        val island = HypixelLocationState.currentIsland
+        val normalized = normalizeSkyBlockMobName(mob.name).withoutSkyBlockMobModifierPrefix(ignoreCase = true)
+        if (normalized.isNotEmpty()) {
+            EliteSignalBus.publish(EliteLocalSignal.MobKill(normalized, island))
         }
     }
 

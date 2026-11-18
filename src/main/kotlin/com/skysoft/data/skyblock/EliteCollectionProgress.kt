@@ -17,6 +17,7 @@ internal object EliteCollectionProgress {
     private val removalSuppressions = CollectionItemSuppressions()
     private val pendingCompactionRemovals = CollectionPendingRemovals()
     private var cachedCatalogVersion = Long.MIN_VALUE
+    private var cachedDataVersion = Long.MIN_VALUE
     private var itemContributions: Map<String, List<CollectionContribution>> = emptyMap()
     private var craftingInputs: Map<String, CraftingConversion> = emptyMap()
 
@@ -63,10 +64,8 @@ internal object EliteCollectionProgress {
         SkyBlockProfileApi.onProfileChange("Elite Leaderboard collection profile reset", { true }) { clearTransient() }
     }
 
-    private fun isCollectionTrackingActive(): Boolean {
-        if (!EliteLeaderboardClient.isTrackingLocalProgress() || !HypixelLocationState.inSkyBlock) return false
-        return EliteLeaderboardCatalog.info(EliteLeaderboardClient.activeBoardId()).collectionId != null
-    }
+    private fun isCollectionTrackingActive(): Boolean =
+        EliteLeaderboardClient.isTrackingLocalProgress() && HypixelLocationState.inSkyBlock
 
     private fun onItemChanges(batch: SkyBlockItemChangeBatch) {
         val unsuppressed = consumeSuppressions(batch)
@@ -84,22 +83,21 @@ internal object EliteCollectionProgress {
         val deltasByCollection = mutableMapOf<String, Double>()
         effectiveGains.forEach { (itemId, amount) ->
             if (amount <= 0) return@forEach
-            itemContributions[itemId].orEmpty().forEach { contribution ->
+            // Inventory reports raw NBT ids while sacks/item-name lookups report canonical ids;
+            // both are folded to the same join key so colon-bearing items actually match.
+            itemContributions[eliteCollectionJoinKey(itemId)].orEmpty().forEach { contribution ->
                 deltasByCollection[contribution.collectionId] =
                     (deltasByCollection[contribution.collectionId] ?: 0.0) + amount * contribution.multiplier
             }
         }
         deltasByCollection.forEach { (collectionId, delta) ->
             if (delta > 0.0) {
-                val boards = EliteLeaderboardCatalog.boardsForCollection(collectionId)
-                if (boards.isNotEmpty()) EliteLeaderboardClient.addLocalProgress(boards, delta)
+                EliteSignalBus.publish(EliteLocalSignal.CollectionGain(collectionId, delta))
             }
         }
     }
 
     private fun onGemstoneSackChanges(batch: SkyBlockSackChangeBatch) {
-        val gemstoneBoards = EliteLeaderboardCatalog.boardsForCollection(GEMSTONE_COLLECTION_ID)
-        if (gemstoneBoards.isEmpty()) return
         var totalGemstoneUnits = 0.0
         batch.changes.forEach { change ->
             if (change.amount <= 0) return@forEach
@@ -108,7 +106,7 @@ internal object EliteCollectionProgress {
             totalGemstoneUnits += change.amount * multiplier
         }
         if (totalGemstoneUnits > 0.0) {
-            EliteLeaderboardClient.addLocalProgress(gemstoneBoards, totalGemstoneUnits)
+            EliteSignalBus.publish(EliteLocalSignal.CollectionGain(GEMSTONE_COLLECTION_ID, totalGemstoneUnits))
         }
     }
 
@@ -127,14 +125,16 @@ internal object EliteCollectionProgress {
     private fun reconcileCompaction(changes: Map<String, Int>): Map<String, Int> {
         pendingCompactionRemovals.pruneExpired()
         changes.forEach { (itemId, amount) ->
-            if (amount < 0 && itemId in itemContributions) {
-                pendingCompactionRemovals.add(itemId, -amount)
+            val key = eliteCollectionJoinKey(itemId)
+            if (amount < 0 && key in itemContributions) {
+                pendingCompactionRemovals.add(key, -amount)
             }
         }
         return buildMap {
             changes.forEach { (itemId, amount) ->
-                if (amount <= 0 || itemId !in itemContributions) return@forEach
-                val conversion = craftingInputs[itemId]
+                val key = eliteCollectionJoinKey(itemId)
+                if (amount <= 0 || key !in itemContributions) return@forEach
+                val conversion = craftingInputs[key]
                 if (conversion == null) {
                     put(itemId, amount)
                     return@forEach
@@ -153,15 +153,26 @@ internal object EliteCollectionProgress {
     }
 
     private fun ensureContributionIndex() {
-        val version = SkyBlockDataRepository.snapshotVersion
-        if (version == cachedCatalogVersion && itemContributions.isNotEmpty()) return
-        if (SkyBlockDataRepository.status.state != SkyBlockDataLoadState.READY) return
-        val recipes = SkyBlockDataRepository.pricingRecipes ?: return
-        cachedCatalogVersion = version
+        val dataVersion = SkyBlockDataRepository.snapshotVersion
+        val catalogVersion = EliteLeaderboardCatalog.version
+        if (dataVersion == cachedDataVersion &&
+            catalogVersion == cachedCatalogVersion &&
+            itemContributions.isNotEmpty()
+        ) {
+            return
+        }
+        // Root mappings come from the Elite catalog and need no recipe data. Recipes only add the
+        // crafting-compaction conversions, so a failed or still-running item-data load must not
+        // disable collections that map directly to an item id (diamond, emerald, ...).
+        val recipes = SkyBlockDataRepository.pricingRecipes.takeIf { isDataReady() }
         val built = buildCollectionIndex(recipes)
+        cachedDataVersion = dataVersion
+        cachedCatalogVersion = catalogVersion
         itemContributions = built.contributions
         craftingInputs = built.conversions
     }
+
+    private fun isDataReady(): Boolean = SkyBlockDataRepository.status.state == SkyBlockDataLoadState.READY
 
     private fun clearTransient() {
         gainSuppressions.clear()
@@ -186,11 +197,12 @@ private data class BuiltCollectionIndex(
     val conversions: Map<String, CraftingConversion>,
 )
 
-private fun buildCollectionIndex(recipes: SkyBlockRecipeSnapshot): BuiltCollectionIndex {
+private fun buildCollectionIndex(recipes: SkyBlockRecipeSnapshot?): BuiltCollectionIndex {
     val rootMappings = collectRootMappings()
     val conversions = mutableMapOf<String, CraftingConversion>()
     val byResult = mutableMapOf<String, List<CraftingConversion>>()
-    recipes.recipesByResult.forEach { (resultKey, recipeList) ->
+    // Without item data there are no recipes, so only the direct catalog mappings are indexed.
+    recipes?.recipesByResult?.forEach { (resultKey, recipeList) ->
         if (resultKey.kind != ItemListEntryKind.SKYBLOCK) return@forEach
         val itemId = resultKey.id
         if (isExcludedCraftedResult(itemId)) return@forEach
@@ -247,15 +259,15 @@ private fun collectRootMappings(): Map<String, List<String>> {
         .forEach { collectionId ->
             when (collectionId) {
                 MUSHROOM_COLLECTION_ID -> {
-                    map.getOrPut("BROWN_MUSHROOM", ::mutableListOf).add(collectionId)
-                    map.getOrPut("RED_MUSHROOM", ::mutableListOf).add(collectionId)
+                    map.getOrPut(eliteCollectionJoinKey("BROWN_MUSHROOM"), ::mutableListOf).add(collectionId)
+                    map.getOrPut(eliteCollectionJoinKey("RED_MUSHROOM"), ::mutableListOf).add(collectionId)
                 }
                 GEMSTONE_COLLECTION_ID -> {
                     GEMSTONE_TYPES.forEach { gemType ->
-                        map.getOrPut("ROUGH_${gemType}_GEM", ::mutableListOf).add(collectionId)
+                        map.getOrPut(eliteCollectionJoinKey("ROUGH_${gemType}_GEM"), ::mutableListOf).add(collectionId)
                     }
                 }
-                else -> map.getOrPut(collectionId, ::mutableListOf).add(collectionId)
+                else -> map.getOrPut(eliteCollectionJoinKey(collectionId), ::mutableListOf).add(collectionId)
             }
         }
     return map
