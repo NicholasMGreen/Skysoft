@@ -90,13 +90,27 @@ object EliteLeaderboardCatalog {
     var version: Long = 0L
         private set
 
+    /**
+     * Boards whose local tracking cannot work, hidden from the picker.
+     *
+     * Ghost kills are not observable in-client: the mob never surfaces a nameplate the tracker can
+     * pair with an entity, so no kill signal is ever produced and a locally tracked gain is
+     * impossible. The board still fetches from Elite every 10 minutes, which made the gap look like
+     * a bug rather than a missing capability. Offering it invited exactly that confusion, so it is
+     * withheld until local tracking has a signal to work with.
+     */
+    internal fun isUnsupportedBoard(boardId: String): Boolean =
+        normalizeEliteBoardId(boardId) in UNSUPPORTED_BOARD_IDS
+
     fun entries(): List<EliteLeaderboardInfo> {
         val source = catalog.ifEmpty { FALLBACK_BOARDS }
-        return source.values.sortedWith(
-            compareBy<EliteLeaderboardInfo> { it.category }
-                .thenBy { it.intervalType.sortOrder }
-                .thenBy { it.title },
-        )
+        return source.values
+            .filterNot { info -> isUnsupportedBoard(info.id) }
+            .sortedWith(
+                compareBy<EliteLeaderboardInfo> { it.category }
+                    .thenBy { it.intervalType.sortOrder }
+                    .thenBy { it.title },
+            )
     }
 
     fun categories(): List<String> =
@@ -214,6 +228,14 @@ internal fun normalizeEliteBoardId(boardId: String): String =
     boardId.trim().lowercase(Locale.ROOT).ifEmpty { DEFAULT_ELITE_BOARD_ID }
 
 internal const val DEFAULT_ELITE_BOARD_ID = "blaze-slayer"
+
+/**
+ * Boards withheld from the picker because they have no in-client kill signal.
+ *
+ * `bestiary-ghost` is the only entry today: Ghosts expose no nameplate the mob tracker can pair with
+ * an entity, so a kill can never be observed and the local offset can never advance.
+ */
+private val UNSUPPORTED_BOARD_IDS = setOf("bestiary-ghost")
 
 /**
  * Placeholder for a board id in neither the live catalog nor the fallback table.

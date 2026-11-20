@@ -61,7 +61,14 @@ object EliteLeaderboardClient {
         if (settings.followActiveSlayerQuest) {
             SlayerQuestState.scoreboardSlayerType?.let { return slayerBoardId(it) }
         }
-        return normalizeEliteBoardId(settings.boardId)
+        // A configured board may now be unsupported: fall back to the default rather than leaving the
+        // overlay pinned to a board that has no local signal and no longer appears in the picker.
+        val configured = normalizeEliteBoardId(settings.boardId)
+        return if (EliteLeaderboardCatalog.isUnsupportedBoard(configured)) {
+            DEFAULT_ELITE_BOARD_ID
+        } else {
+            configured
+        }
     }
 
     internal fun snapshotFor(boardId: String): EliteLeaderboardSnapshot? {
